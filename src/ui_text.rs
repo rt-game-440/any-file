@@ -53,6 +53,16 @@ pub fn apply_ui_strings(window: &MainWindow, s: &UiStrings) {
     tr.set_video_hint(s.video_hint.as_str().into());
     tr.set_video_loading(s.video_loading.as_str().into());
     tr.set_audio_hint(s.audio_hint.as_str().into());
+    tr.set_image_fit(s.image_fit.as_str().into());
+    tr.set_image_actual(s.image_actual.as_str().into());
+    tr.set_image_rotate(s.image_rotate.as_str().into());
+    tr.set_image_copy(s.image_copy.as_str().into());
+    tr.set_image_fullscreen(s.image_fullscreen.as_str().into());
+    tr.set_image_exit_fullscreen(s.image_exit_fullscreen.as_str().into());
+    tr.set_image_loading(s.image_loading.as_str().into());
+    tr.set_image_hint(s.image_hint.as_str().into());
+    tr.set_toast_image_copied(s.toast_image_copied.as_str().into());
+    tr.set_image_decode_failed(s.image_decode_failed.as_str().into());
     tr.set_op_delete(s.op_delete.as_str().into());
     tr.set_op_copy_path(s.op_copy_path.as_str().into());
     tr.set_op_reveal(s.op_reveal.as_str().into());

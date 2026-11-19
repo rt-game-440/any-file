@@ -130,6 +130,16 @@ ui_strings! {
     video_hint: "Space 播放/暂停 · ←/→ 快退/快进 5 秒 · PageUp/PageDown 或 Ctrl+←/→ 切换文件 · M 静音 · F 全屏 · S 字幕", "Space play/pause · ←/→ seek 5 s · PageUp/PageDown or Ctrl+←/→ change file · M mute · F fullscreen · S subtitles";
     video_loading: "正在载入视频…", "Loading video…";
     audio_hint: "Space 播放/暂停 · ←/→ 快退/快进 5 秒 · PageUp/PageDown 或 Ctrl+←/→ 切歌 · M 静音", "Space play/pause · ←/→ seek 5 s · PageUp/PageDown or Ctrl+←/→ change track · M mute";
+    image_fit: "适应窗口", "Fit";
+    image_actual: "原始大小 1:1", "Actual size 1:1";
+    image_rotate: "旋转", "Rotate";
+    image_copy: "复制图像", "Copy image";
+    image_fullscreen: "全屏", "Fullscreen";
+    image_exit_fullscreen: "退出全屏", "Exit fullscreen";
+    image_loading: "正在加载…", "Loading…";
+    image_hint: "滚轮缩放 · 拖拽平移 · 双击适应/1:1 · R 旋转 · Ctrl+C 复制 · F11 全屏", "Wheel zoom · drag to pan · double-click fit/1:1 · R rotate · Ctrl+C copy · F11 fullscreen";
+    toast_image_copied: "图像已复制", "Image copied";
+    image_decode_failed: "无法解码此图像", "Cannot decode this image";
     op_delete: "删除", "Delete";
     op_copy_path: "复制路径", "Copy path";
     op_reveal: "在资源管理器中显示", "Show in Explorer";

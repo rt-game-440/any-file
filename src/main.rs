@@ -6,6 +6,7 @@
 )]
 
 mod editor_glue;
+mod image_glue;
 mod video_glue;
 
 use std::cell::RefCell;
@@ -89,6 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. 创建并绑定 Slint 主窗口
     let window = MainWindow::new()?;
     let renderer_label = active_renderer.display_label();
+    image_glue::wire(&window, &session);
     sync_session_to_window(&window, &session, renderer_label);
     sync_motion_to_window(&window, session.motion_snapshot());
     window.set_version_text(env!("CARGO_PKG_VERSION").into());
@@ -612,6 +614,7 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
     }
     sync_audio_to_window(window, session);
     video_glue::sync_state(window, session);
+    image_glue::sync_state(window, session);
     editor_glue::sync_state(window, session);
 }
 
