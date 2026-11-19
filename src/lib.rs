@@ -3,6 +3,7 @@
 
 pub mod domain;
 pub mod fixtures;
+pub mod motion;
 pub mod platform;
 pub mod ports;
 pub mod probing;

@@ -9,6 +9,7 @@ use crate::domain::{
     CloseDecision, FallbackInfo, FileEntry, MediaCategory, MotionProfile, ResolvedTheme,
     SiblingSequence, TextMode, ThemePreference, ViewerKind,
 };
+use crate::motion::{MotionChannel, MotionEngine, MotionSnapshot};
 use crate::ports::{Clock, SystemShell, VideoBackend};
 use crate::probing;
 use crate::sibling::{self, DirectoryWatcher};
@@ -29,6 +30,8 @@ struct SessionState {
     theme_preference: ThemePreference,
     resolved_theme: ResolvedTheme,
     motion_profile: MotionProfile,
+    motion_engine: MotionEngine,
+    last_motion_tick: Instant,
     started_at: Instant,
 }
 
@@ -49,8 +52,20 @@ impl AppSession {
         video_backend: Arc<dyn VideoBackend>,
     ) -> Self {
         let resolved_theme = shell.system_theme();
-        let motion_profile = MotionProfile::for_system_setting(shell.prefers_reduced_motion());
+        let reduced_motion = shell.prefers_reduced_motion();
+        let motion_profile = MotionProfile::for_system_setting(reduced_motion);
         let started_at = clock.now();
+
+        let mut motion_engine = MotionEngine::new(reduced_motion);
+        motion_engine.set_immediate(MotionChannel::ViewTransition, 1.0);
+        motion_engine.set_immediate(MotionChannel::ButtonScale, 1.0);
+        motion_engine.set_immediate(MotionChannel::ChromeOpacity, 1.0);
+        motion_engine.animate_from_to(
+            MotionChannel::WelcomeEntrance,
+            0.0,
+            1.0,
+            MotionProfile::smooth(),
+        );
 
         Self {
             shell,
@@ -69,6 +84,8 @@ impl AppSession {
                 theme_preference: ThemePreference::System,
                 resolved_theme,
                 motion_profile,
+                motion_engine,
+                last_motion_tick: started_at,
                 started_at,
             })),
             watcher: Mutex::new(None),
@@ -125,6 +142,55 @@ impl AppSession {
         self.state.read().unwrap().motion_profile
     }
 
+    /// 获取当前动效状态快照（不推进时钟）
+    pub fn motion_snapshot(&self) -> MotionSnapshot {
+        self.state.read().unwrap().motion_engine.snapshot()
+    }
+
+    /// 当前是否存在仍在运行中的物理弹簧动画
+    pub fn has_active_animations(&self) -> bool {
+        self.state
+            .read()
+            .unwrap()
+            .motion_engine
+            .has_active_animations()
+    }
+
+    /// 依据注入的 `Clock` 计算真实 `dt` 并推进一步物理弹簧解算，返回最新快照。
+    pub fn tick_motion(&self) -> MotionSnapshot {
+        let now = self.clock.now();
+        let mut guard = self.state.write().unwrap();
+        let dt = now.saturating_duration_since(guard.last_motion_tick);
+        guard.last_motion_tick = now;
+        guard.motion_engine.advance(dt);
+        guard.motion_engine.snapshot()
+    }
+
+    /// 驱动指定动效通道向目标值过渡（支持中途打断与速度继承）。
+    pub fn animate_channel(&self, channel: MotionChannel, target: f32, profile: MotionProfile) {
+        let now = self.clock.now();
+        let mut guard = self.state.write().unwrap();
+        if !guard.motion_engine.has_active_animations() {
+            guard.last_motion_tick = now;
+        }
+        guard.motion_engine.animate_to(channel, target, profile);
+    }
+
+    /// 触发一次标准视图切换过渡（`0.0 -> 1.0`）；减弱动效模式下立即落到 `1.0`。
+    pub fn trigger_view_transition(&self) {
+        let now = self.clock.now();
+        let mut guard = self.state.write().unwrap();
+        if !guard.motion_engine.has_active_animations() {
+            guard.last_motion_tick = now;
+        }
+        guard.motion_engine.animate_from_to(
+            MotionChannel::ViewTransition,
+            0.0,
+            1.0,
+            MotionProfile::snappy(),
+        );
+    }
+
     /// 查询视频后端是否可用
     pub fn is_video_backend_available(&self) -> bool {
         self.video_backend.is_available()
@@ -160,6 +226,7 @@ impl AppSession {
             guard.resolved_theme = system_theme;
         }
         guard.motion_profile = MotionProfile::for_system_setting(reduced_motion);
+        guard.motion_engine.set_reduced_motion(reduced_motion);
     }
 
     /// 打开指定路径的文件项：执行 Magic Bytes / 流信息 / 编码懒探测，并按扩展名构建同目录序列（ADR-0006）。
@@ -366,6 +433,7 @@ impl AppSession {
         let probe = probing::probe_file(path, self.video_backend.as_ref());
         let entry = FileEntry::new(path.to_path_buf(), probe.media_category);
         let viewer = ViewerKind::from(probe.media_category);
+        let now = self.clock.now();
 
         let (filter_by_category, filter_cat) = {
             let guard = self.state.read().unwrap();
@@ -400,6 +468,15 @@ impl AppSession {
         guard.sibling_sequence = sequence;
         guard.text_mode = TextMode::Viewing;
         guard.has_unsaved_changes = false;
+        if !guard.motion_engine.has_active_animations() {
+            guard.last_motion_tick = now;
+        }
+        guard.motion_engine.animate_from_to(
+            MotionChannel::ViewTransition,
+            0.0,
+            1.0,
+            MotionProfile::snappy(),
+        );
         drop(guard);
 
         self.ensure_watching_parent(path);

@@ -1,4 +1,4 @@
-// AnyFile 主窗口视图（含欢迎空态、同目录导航栏、查看器切换入口与纯二进制/损坏文件兜底信息卡）
+// AnyFile 主窗口视图（含欢迎空态、物理弹簧动效绑定、同目录导航栏、查看器切换入口与兜底信息卡）
 
 component ActionPill inherits TouchArea {
     in property <string> label;
@@ -56,6 +56,10 @@ export component MainWindow inherits Window {
     in property <string> status-subtitle: "拖放任意文件到此处，或点击下方按钮打开";
     in property <string> renderer-label: "Skia";
     in property <bool> reduced-motion: false;
+    // 由 Rust 统一物理弹簧驱动实时写入的动效状态
+    in property <float> welcome-progress: 1.0;
+    in property <float> view-transition: 1.0;
+    in property <float> button-scale: 1.0;
 
     // 视图与文件项状态（工单 #5）
     in property <string> active-viewer: "welcome";
@@ -74,6 +78,7 @@ export component MainWindow inherits Window {
     in property <string> fallback-reason: "";
 
     callback open-file-clicked();
+    callback open-button-state-changed(bool, bool);
     callback prev-sibling-clicked();
     callback next-sibling-clicked();
     callback toggle-filter-clicked();
@@ -106,8 +111,12 @@ export component MainWindow inherits Window {
         }
 
         VerticalLayout {
-            padding: 24px;
+            padding-left: 24px;
+            padding-right: 24px;
+            padding-top: 24px + (1.0 - root.welcome-progress) * 14px;
+            padding-bottom: 24px;
             spacing: 16px;
+            opacity: clamp(root.welcome-progress * root.view-transition, 0.0, 1.0);
 
             // 顶部导航与操作工具栏（仅在已打开文件时显示）
             if root.active-viewer != "welcome" : HorizontalLayout {
@@ -163,7 +172,7 @@ export component MainWindow inherits Window {
                 vertical-stretch: 1;
                 alignment: center;
 
-                // 1. 极简欢迎 / 拖放空态
+                // 1. 极简欢迎 / 拖放空态（保留物理弹性按钮反馈）
                 if root.active-viewer == "welcome" : HorizontalLayout {
                     alignment: center;
 
@@ -202,13 +211,46 @@ export component MainWindow inherits Window {
                                 alignment: center;
                                 padding-top: 8px;
 
-                                ActionPill {
-                                    width: 156px;
-                                    height: 40px;
-                                    label: "打开文件";
-                                    dark-mode: root.dark-mode;
-                                    primary: true;
-                                    clicked => { root.open-file-clicked(); }
+                                Rectangle {
+                                    width: 164px;
+                                    height: 44px;
+
+                                    open-touch := TouchArea {
+                                        width: 156px * clamp(root.button-scale, 0.85, 1.15);
+                                        height: 40px * clamp(root.button-scale, 0.85, 1.15);
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.open-file-clicked();
+                                        }
+                                        changed has-hover => {
+                                            root.open-button-state-changed(self.has-hover, self.pressed);
+                                        }
+                                        changed pressed => {
+                                            root.open-button-state-changed(self.has-hover, self.pressed);
+                                        }
+
+                                        Rectangle {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            border-radius: 10px;
+                                            background: open-touch.pressed
+                                                ? (root.dark-mode ? #2A63C9 : #1D53B8)
+                                                : (open-touch.has-hover
+                                                    ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
+                                                    : (root.dark-mode ? #3370E3 : #2563EB));
+
+                                            Text {
+                                                text: "打开文件";
+                                                font-size: 14px;
+                                                font-weight: 600;
+                                                color: #FFFFFF;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -280,7 +322,7 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                // 3. 已探测媒体视图（图像 / 视频 / 音频 / 文本占位面板，供后续专有查看器工单填充）
+                // 3. 已探测媒体视图（图像 / 视频 / 音频 / 文本占位面板）
                 if root.active-viewer != "welcome" && root.active-viewer != "unsupported" : HorizontalLayout {
                     alignment: center;
 
