@@ -1,0 +1,274 @@
+import { Tr } from "i18n.slint";
+
+// 视频视图（Video Viewer）：画面 + 悬浮控制条（鼠标空闲淡出）。
+// 纯展示组件：帧与状态由 Rust 侧（src/video_viewer）注入，用户操作通过回调上抛。
+
+component VideoButton inherits TouchArea {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> active: false;
+
+    height: 32px;
+    min-width: 56px;
+    mouse-cursor: pointer;
+
+    Rectangle {
+        border-radius: 16px;
+        background: root.primary
+            ? (root.pressed ? #1D53B8 : (root.has-hover ? #2B6CE6 : #2563EB))
+            : root.active
+                ? #3A4F7E
+                : (root.pressed ? #3A3F4B : (root.has-hover ? #2E333D : #1E2129));
+
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            alignment: center;
+
+            Text {
+                text: root.label;
+                font-size: 13px;
+                font-weight: 500;
+                vertical-alignment: center;
+                color: #F2F4F8;
+            }
+        }
+    }
+}
+
+export component VideoViewerPanel inherits Rectangle {
+    in property <image> frame;
+    in property <bool> has-frame: false;
+    in property <float> position-secs: 0;
+    in property <float> duration-secs: 0;
+    in property <string> position-text: "0:00";
+    in property <string> duration-text: "0:00";
+    in property <bool> playing: false;
+    in property <string> speed-text: "1x";
+    in property <float> volume: 1.0;
+    in property <bool> muted: false;
+    in property <bool> subtitles-visible: true;
+    in property <bool> has-subtitles: false;
+    in property <bool> fullscreen: false;
+    in property <bool> controls-visible: true;
+    in property <string> error-text: "";
+    in property <bool> can-prev: false;
+    in property <bool> can-next: false;
+
+    callback toggle-play();
+    callback seek-to(float);
+    callback cycle-speed();
+    callback set-volume(float);
+    callback toggle-mute();
+    callback prev-file();
+    callback next-file();
+    callback toggle-subtitles();
+    callback toggle-fullscreen();
+    callback activity();
+    callback hover-controls(bool);
+    // 画面区域尺寸变化（逻辑像素），Rust 据此决定渲染分辨率
+    callback area-resized(length, length);
+
+    property <bool> dragging: false;
+    property <float> drag-fraction: 0;
+    property <float> shown-fraction: root.dragging
+        ? root.drag-fraction
+        : (root.duration-secs > 0 ? Math.clamp(root.position-secs / root.duration-secs, 0, 1) : 0);
+
+    background: #000000;
+    border-radius: root.fullscreen ? 0px : 12px;
+    clip: true;
+
+    changed width => { root.area-resized(self.width, self.height); }
+    changed height => { root.area-resized(self.width, self.height); }
+    init => { root.area-resized(self.width, self.height); }
+
+    if root.has-frame : Image {
+        source: root.frame;
+        width: parent.width;
+        height: parent.height;
+        image-fit: ImageFit.fill;
+    }
+
+    if !root.has-frame && root.error-text == "" : Text {
+        text: Tr.video-loading;
+        color: #9DA5B4;
+        font-size: 14px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if root.error-text != "" : Text {
+        text: root.error-text;
+        color: #F08A8A;
+        font-size: 14px;
+        wrap: word-wrap;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    // 画面区：单击播放/暂停、双击全屏、移动即唤出控制条
+    TouchArea {
+        mouse-cursor: root.controls-visible ? default : none;
+        moved => { root.activity(); }
+        clicked => { root.activity(); root.toggle-play(); }
+        double-clicked => { root.toggle-fullscreen(); }
+    }
+
+    // 悬浮控制条
+    controls := Rectangle {
+        y: parent.height - self.height;
+        height: 96px;
+        opacity: root.controls-visible ? 1.0 : 0.0;
+        visible: self.opacity > 0.01;
+        animate opacity { duration: 220ms; easing: ease-in-out; }
+        background: @linear-gradient(180deg, #00000000 0%, #000000CC 100%);
+
+        TouchArea {
+            mouse-cursor: default;
+            moved => { root.activity(); }
+            changed has-hover => { root.hover-controls(self.has-hover); }
+        }
+
+        VerticalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-bottom: 12px;
+            padding-top: 26px;
+            spacing: 8px;
+
+            // 进度条
+            Rectangle {
+                height: 18px;
+
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 5px;
+                    border-radius: 2.5px;
+                    background: #FFFFFF40;
+
+                    Rectangle {
+                        width: parent.width * root.shown-fraction;
+                        height: parent.height;
+                        border-radius: 2.5px;
+                        background: #2563EB;
+                    }
+                }
+
+                Rectangle {
+                    x: parent.width * root.shown-fraction - self.width / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 13px;
+                    height: 13px;
+                    border-radius: 6.5px;
+                    background: #FFFFFF;
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    pointer-event(e) => {
+                        root.activity();
+                        if (e.button == PointerEventButton.left) {
+                            if (e.kind == PointerEventKind.down) {
+                                root.dragging = true;
+                                root.drag-fraction = Math.clamp(self.mouse-x / self.width, 0, 1);
+                            }
+                            if (e.kind == PointerEventKind.up) {
+                                root.dragging = false;
+                                root.seek-to(Math.clamp(self.mouse-x / self.width, 0, 1) * root.duration-secs);
+                            }
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.drag-fraction = Math.clamp(self.mouse-x / self.width, 0, 1);
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+
+                VideoButton {
+                    label: Tr.video-prev;
+                    clicked => { root.prev-file(); }
+                    enabled: root.can-prev;
+                    opacity: root.can-prev ? 1.0 : 0.4;
+                }
+                VideoButton {
+                    label: root.playing ? Tr.video-pause : Tr.video-play;
+                    primary: true;
+                    clicked => { root.toggle-play(); }
+                }
+                VideoButton {
+                    label: Tr.video-next;
+                    clicked => { root.next-file(); }
+                    enabled: root.can-next;
+                    opacity: root.can-next ? 1.0 : 0.4;
+                }
+
+                Text {
+                    text: root.position-text + " / " + root.duration-text;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    color: #E2E6EE;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                VideoButton {
+                    label: Tr.video-speed-prefix + root.speed-text;
+                    clicked => { root.cycle-speed(); }
+                }
+                VideoButton {
+                    label: root.muted ? Tr.video-unmute : Tr.video-mute;
+                    active: root.muted;
+                    clicked => { root.toggle-mute(); }
+                }
+                Rectangle {
+                    width: 90px;
+                    height: 32px;
+
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: #FFFFFF40;
+
+                        Rectangle {
+                            width: parent.width * (root.muted ? 0 : root.volume);
+                            height: parent.height;
+                            border-radius: 2px;
+                            background: root.muted ? #8A92A3 : #2563EB;
+                        }
+                    }
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        pointer-event(e) => {
+                            root.activity();
+                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                                root.set-volume(Math.clamp(self.mouse-x / self.width, 0, 1));
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                root.set-volume(Math.clamp(self.mouse-x / self.width, 0, 1));
+                            }
+                        }
+                    }
+                }
+                if root.has-subtitles : VideoButton {
+                    label: root.subtitles-visible ? Tr.video-subtitles-on : Tr.video-subtitles-off;
+                    active: root.subtitles-visible;
+                    clicked => { root.toggle-subtitles(); }
+                }
+                VideoButton {
+                    label: root.fullscreen ? Tr.video-exit-fullscreen : Tr.video-fullscreen;
+                    clicked => { root.toggle-fullscreen(); }
+                }
+            }
+        }
+    }
+}

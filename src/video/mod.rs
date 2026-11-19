@@ -8,9 +8,12 @@ pub mod ffi;
 pub mod loader;
 pub mod mpv_backend;
 pub mod sandbox;
+pub mod transport;
 
 pub use compositing::{CompositingStrategy, VideoCommand, VideoFrameRgba, VideoPlaybackState};
 pub use error::VideoError;
 pub use loader::{MPV_DLL_NAME, MpvLibrary, is_mpv_module_loaded_in_process};
 pub use mpv_backend::{LazyMpvVideoBackend, MpvInstance};
+
 pub use sandbox::{MpvSandboxPolicy, validate_local_media_path};
+pub use transport::{MpvTransport, TransportSnapshot};
