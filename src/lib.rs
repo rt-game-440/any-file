@@ -7,6 +7,7 @@ pub mod diagnostics;
 pub mod domain;
 pub mod fixtures;
 pub mod i18n;
+pub mod image_viewer;
 pub mod motion;
 pub mod platform;
 pub mod ports;

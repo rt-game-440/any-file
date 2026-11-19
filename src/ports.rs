@@ -39,6 +39,11 @@ pub trait SystemShell: Send + Sync {
         Err("剪贴板操作尚未实现".to_string())
     }
 
+    /// 将 RGBA8（非预乘，行主序，自上而下）图像写入系统剪贴板
+    fn copy_image_to_clipboard(&self, _width: u32, _height: u32, _rgba: &[u8]) -> Result<(), String> {
+        Err("剪贴板操作尚未实现".to_string())
+    }
+
     /// 用系统默认浏览器打开 URL（仅允许本项目 GitHub 地址）
     fn open_url(&self, _url: &str) -> Result<(), String> {
         Err("打开链接尚未实现".to_string())

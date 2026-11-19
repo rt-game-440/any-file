@@ -1,0 +1,205 @@
+// 图像视图（Image Viewer，工单 #6）：全窗口画布 + 自动淡出的底部工具栏。
+// 几何（位置 / 尺寸 / 旋转角）全部由 Rust 侧的物理弹簧变换逐帧写入 ImageState，本文件只负责展示与事件上抛。
+import { Tr } from "i18n.slint";
+
+export global ImageState {
+    // 展示状态（Rust 写入）
+    in-out property <image> thumb;
+    in-out property <image> full;
+    in-out property <bool> has-thumb: false;
+    in-out property <bool> full-visible: false;
+    in-out property <bool> loading: false;
+    in-out property <string> error-text: "";
+    in-out property <length> img-x: 0px;
+    in-out property <length> img-y: 0px;
+    in-out property <length> img-w: 0px;
+    in-out property <length> img-h: 0px;
+    in-out property <float> angle: 0;
+    in-out property <bool> pixelated: false;
+    in-out property <string> zoom-text: "";
+    in-out property <string> info-text: "";
+    in-out property <bool> chrome-visible: true;
+    in-out property <bool> fullscreen: false;
+    in-out property <bool> toolbar-hover: false;
+    in-out property <bool> dragging: false;
+
+    // 交互事件（Rust 处理）
+    callback wheel(float, float, float);
+    callback drag-start(float, float);
+    callback drag-move(float, float);
+    callback drag-end();
+    callback double-clicked(float, float);
+    callback activity();
+    callback key(string, bool, bool) -> bool;
+    callback rotate();
+    callback fit();
+    callback actual();
+    callback copy();
+    callback toggle-fullscreen();
+    callback viewport-changed(float, float);
+}
+
+component ToolButton inherits TouchArea {
+    in property <string> label;
+    in property <bool> dark-mode: false;
+    in property <bool> active: false;
+
+    height: 32px;
+    min-width: 44px;
+    mouse-cursor: pointer;
+
+    Rectangle {
+        border-radius: 16px;
+        background: root.pressed
+            ? (root.dark-mode ? #3A404D : #CBD3E0)
+            : root.has-hover
+                ? (root.dark-mode ? #2E3440 : #DDE3EC)
+                : root.active ? (root.dark-mode ? #28406E : #DCE8FD) : transparent;
+        animate background { duration: 120ms; }
+
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            alignment: center;
+            Text {
+                text: root.label;
+                font-size: 12.5px;
+                vertical-alignment: center;
+                color: root.dark-mode ? #E2E6EE : #1E2430;
+            }
+        }
+    }
+}
+
+export component ImageViewerPanel inherits Rectangle {
+    in property <bool> dark-mode: false;
+    in property <bool> reduced-motion: false;
+
+    background: root.dark-mode ? #0E0F12 : #E6E9EF;
+    clip: true;
+
+    init => { ImageState.viewport-changed(self.width / 1px, self.height / 1px); }
+    changed width => { ImageState.viewport-changed(self.width / 1px, self.height / 1px); }
+    changed height => { ImageState.viewport-changed(self.width / 1px, self.height / 1px); }
+
+    // 图像画布：低清预览层（EXIF 缩略图 / 降采样）+ 完整解码层（渐显替换）
+    Rectangle {
+        x: ImageState.img-x;
+        y: ImageState.img-y;
+        width: ImageState.img-w;
+        height: ImageState.img-h;
+        rotation-angle: ImageState.angle * 1deg;
+
+        if ImageState.has-thumb : Image {
+            width: 100%;
+            height: 100%;
+            source: ImageState.thumb;
+            image-fit: fill;
+            image-rendering: ImageState.pixelated ? pixelated : smooth;
+        }
+        Image {
+            width: 100%;
+            height: 100%;
+            source: ImageState.full;
+            image-fit: fill;
+            image-rendering: ImageState.pixelated ? pixelated : smooth;
+            opacity: ImageState.full-visible ? 1.0 : 0.0;
+            animate opacity { duration: root.reduced-motion ? 0ms : 220ms; easing: ease-out; }
+        }
+    }
+
+    if ImageState.loading && !ImageState.has-thumb && !ImageState.full-visible : Text {
+        text: Tr.image-loading;
+        font-size: 14px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: root.dark-mode ? #9DA5B4 : #5A6475;
+    }
+
+    if ImageState.error-text != "" : Text {
+        text: ImageState.error-text;
+        font-size: 15px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        wrap: word-wrap;
+        color: root.dark-mode ? #F2A1A1 : #B42318;
+    }
+
+    // 全画布指针交互：滚轮缩放 / 拖拽平移 / 双击切换适应与 1:1
+    canvas := TouchArea {
+        scroll-event(e) => {
+            ImageState.wheel(e.delta-y / 1px, self.mouse-x / 1px, self.mouse-y / 1px);
+            accept
+        }
+        pointer-event(e) => {
+            ImageState.activity();
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                ImageState.dragging = true;
+                ImageState.drag-start(self.mouse-x / 1px, self.mouse-y / 1px);
+            } else if (e.kind == PointerEventKind.move && ImageState.dragging) {
+                ImageState.drag-move(self.mouse-x / 1px, self.mouse-y / 1px);
+            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                if (ImageState.dragging) {
+                    ImageState.dragging = false;
+                    ImageState.drag-end();
+                }
+            }
+        }
+        double-clicked => { ImageState.double-clicked(self.mouse-x / 1px, self.mouse-y / 1px); }
+    }
+
+    // 底部悬浮工具栏（鼠标静止后淡出，移动时重现）
+    toolbar := Rectangle {
+        y: parent.height - self.height - 44px;
+        x: (parent.width - self.width) / 2;
+        width: toolbar-row.preferred-width + 20px;
+        height: 44px;
+        border-radius: 22px;
+        background: root.dark-mode ? #CC1C1F26 : #CCFFFFFF;
+        border-width: 1px;
+        border-color: root.dark-mode ? #343944 : #D6DCE6;
+        opacity: ImageState.chrome-visible ? 1.0 : 0.0;
+        visible: self.opacity > 0.01;
+        animate opacity { duration: root.reduced-motion ? 0ms : 260ms; easing: ease-out; }
+
+        toolbar-touch := TouchArea {
+            changed has-hover => { ImageState.toolbar-hover = self.has-hover; }
+        }
+
+        toolbar-row := HorizontalLayout {
+            padding: 6px;
+            spacing: 2px;
+            alignment: center;
+
+            ToolButton { label: Tr.image-fit; dark-mode: root.dark-mode; clicked => { ImageState.fit(); } }
+            ToolButton { label: Tr.image-actual; dark-mode: root.dark-mode; clicked => { ImageState.actual(); } }
+            ToolButton { label: Tr.image-rotate + " (R)"; dark-mode: root.dark-mode; clicked => { ImageState.rotate(); } }
+            ToolButton { label: Tr.image-copy; dark-mode: root.dark-mode; clicked => { ImageState.copy(); } }
+            ToolButton {
+                label: ImageState.fullscreen ? Tr.image-exit-fullscreen : Tr.image-fullscreen;
+                dark-mode: root.dark-mode;
+                active: ImageState.fullscreen;
+                clicked => { ImageState.toggle-fullscreen(); }
+            }
+            Text {
+                text: ImageState.zoom-text;
+                min-width: 52px;
+                font-size: 12.5px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: root.dark-mode ? #9DA5B4 : #5A6475;
+            }
+        }
+    }
+
+    // 顶部左下角格式 / 尺寸信息（随工具栏一同淡出）
+    Text {
+        x: 16px;
+        y: parent.height - 28px;
+        text: ImageState.info-text;
+        font-size: 12px;
+        opacity: ImageState.chrome-visible ? 1.0 : 0.0;
+        animate opacity { duration: root.reduced-motion ? 0ms : 260ms; easing: ease-out; }
+        color: root.dark-mode ? #7B8394 : #7A8496;
+    }
+}

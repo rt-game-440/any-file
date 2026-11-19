@@ -7,8 +7,9 @@ export { EditorState }
 import { AudioViewerPanel } from "audio_viewer.slint";
 import { Tr } from "i18n.slint";
 import { SettingsOverlay } from "settings_overlay.slint";
+import { ImageViewerPanel, ImageState } from "image_viewer.slint";
 
-export { Tr }
+export { Tr, ImageState }
 
 component ActionPill inherits TouchArea {
     in property <string> label;
@@ -210,6 +211,11 @@ export component MainWindow inherits Window {
                     return accept;
                 }
             }
+            if (root.active-viewer == "image") {
+                if (ImageState.key(event.text, event.modifiers.control, event.modifiers.shift)) {
+                    return accept;
+                }
+            }
             if (event.text == Key.Delete && root.active-viewer != "welcome" && !root.settings-open && !EditorState.active) {
                 root.delete-clicked();
                 return accept;
@@ -227,6 +233,15 @@ export component MainWindow inherits Window {
             return reject;
         }
 
+        if root.active-viewer == "image" : ImageViewerPanel {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            dark-mode: root.dark-mode;
+            reduced-motion: root.reduced-motion;
+        }
+
         VerticalLayout {
             padding: 0px;
             spacing: 0px;
@@ -235,6 +250,8 @@ export component MainWindow inherits Window {
             Rectangle {
                 height: 36px;
                 background: root.dark-mode ? #181A1F : #ECEFF4;
+                opacity: root.active-viewer == "image" && !ImageState.chrome-visible ? 0.0 : 1.0;
+                animate opacity { duration: root.reduced-motion ? 0ms : 260ms; easing: ease-out; }
 
                 HorizontalLayout {
                     padding-left: 14px;
@@ -405,6 +422,8 @@ export component MainWindow inherits Window {
                 if root.active-viewer != "welcome" : HorizontalLayout {
                     spacing: 8px;
                     alignment: space-between;
+                    opacity: root.active-viewer == "image" && !ImageState.chrome-visible ? 0.0 : 1.0;
+                    animate opacity { duration: root.reduced-motion ? 0ms : 260ms; easing: ease-out; }
 
                     HorizontalLayout {
                         spacing: 8px;
@@ -709,7 +728,7 @@ export component MainWindow inherits Window {
                     }
 
                     // 3. 已探测媒体视图（图像 / 视频 / 文本占位面板）
-                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" && root.active-viewer != "audio" && root.active-viewer != "text" : HorizontalLayout {
+                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" && root.active-viewer != "audio" && root.active-viewer != "text" && root.active-viewer != "image" : HorizontalLayout {
                         alignment: center;
 
                         Rectangle {
@@ -754,6 +773,8 @@ export component MainWindow inherits Window {
                 HorizontalLayout {
                     alignment: center;
                     spacing: 16px;
+                    opacity: root.active-viewer == "image" && !ImageState.chrome-visible && root.toast-text == "" ? 0.0 : 1.0;
+                    animate opacity { duration: root.reduced-motion ? 0ms : 260ms; easing: ease-out; }
 
                     Text {
                         text: root.toast-text != "" ? root.toast-text : (root.active-viewer == "welcome" ? root.recent-hint : Tr.hint-siblings);

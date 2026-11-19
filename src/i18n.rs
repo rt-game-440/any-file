@@ -116,6 +116,16 @@ ui_strings! {
     audio_mute: "静音", "Mute";
     audio_auto_next: "自动播放下一首", "Auto-play next";
     audio_hint: "Space 播放/暂停 · ←/→ 快退/快进 5 秒 · PageUp/PageDown 或 Ctrl+←/→ 切歌 · M 静音", "Space play/pause · ←/→ seek 5 s · PageUp/PageDown or Ctrl+←/→ change track · M mute";
+    image_fit: "适应窗口", "Fit";
+    image_actual: "1:1", "1:1";
+    image_rotate: "旋转", "Rotate";
+    image_copy: "复制图像", "Copy image";
+    image_fullscreen: "全屏", "Fullscreen";
+    image_exit_fullscreen: "退出全屏", "Exit fullscreen";
+    image_loading: "正在加载…", "Loading…";
+    image_hint: "滚轮缩放 · 拖拽平移 · 双击适应/1:1 · R 旋转 · Ctrl+C 复制 · F11 全屏", "Wheel zoom · drag to pan · double-click fit/1:1 · R rotate · Ctrl+C copy · F11 fullscreen";
+    toast_image_copied: "图像已复制", "Image copied";
+    image_decode_failed: "无法解码此图像", "Cannot decode this image";
     op_delete: "删除", "Delete";
     op_copy_path: "复制路径", "Copy path";
     op_reveal: "在资源管理器中显示", "Show in Explorer";
