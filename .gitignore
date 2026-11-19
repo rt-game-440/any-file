@@ -1,0 +1,20 @@
+# Rust 构建产物
+/target/
+**/*.rs.bk
+
+# 日志与调试输出
+/logs/
+*.log
+
+# 基准测试与临时产物
+/benchmarks/output/
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.iml
