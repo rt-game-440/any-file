@@ -17,6 +17,7 @@ name = "anyfile"
 path = "src/main.rs"
 
 [dependencies]
+encoding_rs = "0.8"
 cpal = "0.15"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 lofty = "0.22"

@@ -1,5 +1,7 @@
 // AnyFile 主窗口视图（含无边框自定义标题栏、物理弹簧动效绑定、同目录导航栏、查看器切换入口与兜底信息卡）
 
+import { TextViewer, TextRow, TextSegment } from "text_viewer.slint";
+export { TextRow, TextSegment }
 import { AudioViewerPanel } from "audio_viewer.slint";
 import { Tr } from "i18n.slint";
 import { SettingsOverlay } from "settings_overlay.slint";
@@ -124,6 +126,22 @@ export component MainWindow inherits Window {
     callback open-with-other-app-clicked();
     callback file-dropped(string);
 
+    // 文本查看态（工单 #10）
+    in property <[TextRow]> text-rows;
+    in property <length> text-font-size: 14px;
+    in property <string> text-meta: "";
+    in property <string> text-notice: "";
+    in property <string> text-find-status: "";
+    in property <int> text-gutter-digits: 3;
+    in property <int> text-scroll-line: -1;
+    in property <int> text-scroll-tick: 0;
+    callback text-find-changed(string, bool);
+    callback text-find-next();
+    callback text-find-prev();
+    callback text-find-closed();
+    callback text-zoom-wheel(float);
+    callback text-zoom-reset();
+    property <int> find-tick: 0;
     // 音频视图
     in property <string> audio-title: "";
     in property <string> audio-artist: "";
@@ -163,6 +181,24 @@ export component MainWindow inherits Window {
         width: 100%;
         height: 100%;
         key-pressed(event) => {
+            if (root.active-viewer == "text" && event.modifiers.control) {
+                if (event.text == "f") {
+                    root.find-tick += 1;
+                    return accept;
+                }
+                if (event.text == "0") {
+                    root.text-zoom-reset();
+                    return accept;
+                }
+                if (event.text == "=" || event.text == "+") {
+                    root.text-zoom-wheel(1.0);
+                    return accept;
+                }
+                if (event.text == "-") {
+                    root.text-zoom-wheel(-1.0);
+                    return accept;
+                }
+            }
             if (root.active-viewer == "audio") {
                 if (root.audio-key(event.text, event.modifiers.control)) {
                     return accept;
@@ -435,7 +471,26 @@ export component MainWindow inherits Window {
                 // 中央主内容区：欢迎空态 / 兜底信息卡 / 已识别媒体视图
                 VerticalLayout {
                     vertical-stretch: 1;
-                    alignment: center;
+                    alignment: root.active-viewer == "text" ? stretch : center;
+
+                    if root.active-viewer == "text" : TextViewer {
+                        focus-find-tick: root.find-tick;
+                        scroll-line: root.text-scroll-line;
+                        scroll-tick: root.text-scroll-tick;
+                        vertical-stretch: 1;
+                        rows: root.text-rows;
+                        dark-mode: root.dark-mode;
+                        font-size: root.text-font-size;
+                        meta-text: root.text-meta;
+                        notice-text: root.text-notice;
+                        find-status: root.text-find-status;
+                        gutter-digits: root.text-gutter-digits;
+                        find-changed(q, c) => { root.text-find-changed(q, c); }
+                        find-next => { root.text-find-next(); }
+                        find-prev => { root.text-find-prev(); }
+                        find-closed => { root.text-find-closed(); key-handler.focus(); }
+                        zoom-wheel(d) => { root.text-zoom-wheel(d); }
+                    }
 
                     // 1. 极简欢迎 / 拖放空态（保留物理弹性按钮反馈）
                     if root.active-viewer == "welcome" : HorizontalLayout {
@@ -638,7 +693,7 @@ export component MainWindow inherits Window {
                     }
 
                     // 3. 已探测媒体视图（图像 / 视频 / 文本占位面板）
-                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" && root.active-viewer != "audio" : HorizontalLayout {
+                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" && root.active-viewer != "audio" && root.active-viewer != "text" : HorizontalLayout {
                         alignment: center;
 
                         Rectangle {
