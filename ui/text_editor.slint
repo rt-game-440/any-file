@@ -3,13 +3,15 @@
 // 避免在 app.slint 中逐项转发属性。
 
 import { TextEdit } from "std-widgets.slint";
+import { Tr } from "i18n.slint";
 
 export global EditorState {
     // 是否处于编辑态（为真时显示编辑视图并隐藏查看态）
     in-out property <bool> active: false;
     // 编辑缓冲区全文：与 TextEdit 双向绑定，Rust 侧在撤销 / 替换 / 重载时回写
     in-out property <string> text: "";
-    in-out property <bool> autosave: false;
+    // 自动保存开关：由 Rust 从全局配置同步，切换经 autosave-toggle 回调写回配置
+    in property <bool> autosave: false;
     in property <bool> dark-mode: false;
     in property <length> font-size: 14px;
     in property <bool> dirty: false;
@@ -31,6 +33,7 @@ export global EditorState {
     in property <string> dialog-b3: "";
 
     callback begin();
+    callback autosave-toggle();
     callback edited(string);
     callback undo();
     callback redo();
@@ -121,30 +124,30 @@ export component TextEditorView inherits Rectangle {
                 padding: 6px;
                 spacing: 6px;
                 EditorButton {
-                    label: EditorState.dirty ? "保存 ●" : "保存";
+                    label: EditorState.dirty ? Tr.editor-save-dirty : Tr.editor-save;
                     primary: EditorState.dirty;
                     dark-mode: root.dark-mode;
                     clicked => { root.do-save(); }
                 }
                 EditorButton {
-                    label: "另存为";
+                    label: Tr.editor-save-as;
                     dark-mode: root.dark-mode;
                     clicked => { EditorState.save-as(); }
                 }
                 EditorButton {
-                    label: "撤销";
+                    label: Tr.editor-undo;
                     enabled-state: EditorState.can-undo;
                     dark-mode: root.dark-mode;
                     clicked => { if (EditorState.can-undo) { EditorState.undo(); } }
                 }
                 EditorButton {
-                    label: "重做";
+                    label: Tr.editor-redo;
                     enabled-state: EditorState.can-redo;
                     dark-mode: root.dark-mode;
                     clicked => { if (EditorState.can-redo) { EditorState.redo(); } }
                 }
                 EditorButton {
-                    label: "查找替换";
+                    label: Tr.editor-find-replace;
                     dark-mode: root.dark-mode;
                     clicked => {
                         root.find-open = !root.find-open;
@@ -152,9 +155,9 @@ export component TextEditorView inherits Rectangle {
                     }
                 }
                 EditorButton {
-                    label: EditorState.autosave ? "自动保存 ✓" : "自动保存";
+                    label: EditorState.autosave ? Tr.editor-autosave-on : Tr.editor-autosave;
                     dark-mode: root.dark-mode;
-                    clicked => { EditorState.autosave = !EditorState.autosave; }
+                    clicked => { EditorState.autosave-toggle(); }
                 }
                 Text {
                     horizontal-stretch: 1;
@@ -166,7 +169,7 @@ export component TextEditorView inherits Rectangle {
                     color: root.dark-mode ? #9DA5B4 : #5A6475;
                 }
                 EditorButton {
-                    label: "退出编辑 Esc";
+                    label: Tr.editor-exit;
                     dark-mode: root.dark-mode;
                     clicked => { EditorState.exit-request(); }
                 }
@@ -255,14 +258,14 @@ export component TextEditorView inherits Rectangle {
                         }
                     }
                     EditorButton {
-                        label: "替换";
+                        label: Tr.editor-replace;
                         dark-mode: root.dark-mode;
                         clicked => {
                             EditorState.replace-one(find-input.text, replace-input.text, root.case-sensitive);
                         }
                     }
                     EditorButton {
-                        label: "全部替换";
+                        label: Tr.editor-replace-all;
                         dark-mode: root.dark-mode;
                         clicked => {
                             EditorState.replace-all(find-input.text, replace-input.text, root.case-sensitive);
@@ -369,7 +372,7 @@ export component TextEditorView inherits Rectangle {
                     spacing: 8px;
                     alignment: end;
                     EditorButton {
-                        label: "取消";
+                        label: Tr.editor-cancel;
                         dark-mode: root.dark-mode;
                         clicked => { EditorState.dialog-action(0); }
                     }

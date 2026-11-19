@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyfile::i18n::{Language, UiStrings, localize};
 use anyfile::session::{AppSession, PendingAction, UnsavedDecision};
 use anyfile::text_editor::{ConflictKind, SaveOptions, SaveOutcome};
 use anyfile::{EditorState, MainWindow};
@@ -57,6 +58,13 @@ pub fn wire(
         st.on_begin(move || g.begin());
     }
     hook!(on_edited, |g: &Rc<Glue>, t: SharedString| g.edited(&t));
+    {
+        let g = Rc::clone(&glue);
+        st.on_autosave_toggle(move || {
+            g.session.set_auto_save(!g.session.auto_save());
+            (g.resync)();
+        });
+    }
     {
         let g = Rc::clone(&glue);
         st.on_undo(move || g.history(true));
@@ -131,6 +139,8 @@ pub fn sync_state(window: &MainWindow, session: &AppSession) {
     let st = window.global::<EditorState>();
     let active = session.text_edit_active();
     st.set_active(active);
+    // 自动保存开关来自全局配置（设置页切换后即时生效）
+    st.set_autosave(session.auto_save());
     st.set_dark_mode(window.get_dark_mode());
     st.set_font_size(session.text_font_size());
     let dirty = session.text_edit_dirty();
@@ -138,8 +148,10 @@ pub fn sync_state(window: &MainWindow, session: &AppSession) {
     st.set_can_undo(session.text_edit_can_undo());
     st.set_can_redo(session.text_edit_can_redo());
     if let Some((enc, ending, mixed)) = session.text_edit_meta() {
-        let note = if mixed { "（混合换行将统一保存）" } else { "" };
-        st.set_meta(format!("{} · {}{}", enc.label(), ending.label(), note).into());
+        let tr = UiStrings::for_language(session.language());
+        let note = if mixed { tr.editor_mixed_eol_note.as_str() } else { "" };
+        let ending = localize(ending.label(), session.language());
+        st.set_meta(format!("{} · {}{}", enc.label(), ending, note).into());
     }
     if !active {
         st.set_status("".into());
@@ -152,6 +164,14 @@ pub fn sync_state(window: &MainWindow, session: &AppSession) {
 impl Glue {
     fn win(&self) -> Option<MainWindow> {
         self.window.upgrade()
+    }
+
+    fn lang(&self) -> Language {
+        self.session.language()
+    }
+
+    fn tr(&self) -> UiStrings {
+        UiStrings::for_language(self.lang())
     }
 
     fn state_sync(&self) {
@@ -174,7 +194,7 @@ impl Glue {
             }
             Err(e) => {
                 if let Some(w) = self.win() {
-                    w.set_text_notice(e.into());
+                    w.set_text_notice(localize(&e, self.lang()).into());
                 }
             }
         }
@@ -216,6 +236,8 @@ impl Glue {
     }
 
     fn handle_outcome(&self, outcome: SaveOutcome) {
+        let tr = self.tr();
+        let lang = self.lang();
         match outcome {
             SaveOutcome::Saved => {
                 self.set_status("");
@@ -224,18 +246,18 @@ impl Glue {
             SaveOutcome::Conflict(kind) => {
                 let (title, text, b1) = match kind {
                     ConflictKind::Modified => (
-                        "文件已被外部修改",
-                        "磁盘上的文件在你编辑期间被其他程序修改。直接保存会覆盖对方的改动。",
-                        "覆盖保存",
+                        &tr.dlg_conflict_mod_title,
+                        &tr.dlg_conflict_mod_text,
+                        &tr.dlg_overwrite,
                     ),
                     ConflictKind::Deleted => (
-                        "文件已被删除或移动",
-                        "原文件已不存在。可以重新创建并保存，或另存为其他位置。",
-                        "重新创建并保存",
+                        &tr.dlg_conflict_del_title,
+                        &tr.dlg_conflict_del_text,
+                        &tr.dlg_recreate,
                     ),
                 };
-                let b2 = if kind == ConflictKind::Modified { "重新载入" } else { "" };
-                self.show_dialog(Dialog::Conflict(kind), title, text, b1, b2, "另存为…");
+                let b2 = if kind == ConflictKind::Modified { tr.dlg_reload.as_str() } else { "" };
+                self.show_dialog(Dialog::Conflict(kind), title, text, b1, b2, &tr.dlg_save_as);
             }
             SaveOutcome::Unrepresentable(u) => {
                 let enc = self
@@ -245,9 +267,9 @@ impl Glue {
                     .unwrap_or(anyfile::text_viewer::TextEncoding::Utf8);
                 self.show_dialog(
                     Dialog::Unrepresentable,
-                    "存在无法用原编码表示的字符",
-                    &u.message(enc),
-                    "转为 UTF-8 保存",
+                    &tr.dlg_unrep_title,
+                    &unrep_message(&u, enc, lang, &tr),
+                    &tr.dlg_to_utf8,
                     "",
                     "",
                 );
@@ -255,16 +277,16 @@ impl Glue {
             SaveOutcome::NeedSaveAs(m) => {
                 self.show_dialog(
                     Dialog::NeedSaveAs,
-                    "没有写入权限",
-                    &format!("{m}。AnyFile 不会提升权限，请另存到有权限的位置。"),
-                    "另存为…",
+                    &tr.dlg_noperm_title,
+                    &format!("{}{}", localize(&m, lang), tr.dlg_noperm_suffix),
+                    &tr.dlg_save_as,
                     "",
                     "",
                 );
             }
             SaveOutcome::Failed(m) => {
                 self.close_dialog();
-                self.set_status(&format!("保存失败：{m}"));
+                self.set_status(&format!("{}{}", tr.status_save_failed_prefix, localize(&m, lang)));
             }
         }
         (self.resync)();
@@ -276,7 +298,7 @@ impl Glue {
             .current_file_entry()
             .map(|e| e.path)
             .unwrap_or_default();
-        let Some(target) = pick_save_path(&current) else {
+        let Some(target) = pick_save_path(&current, &self.tr().file_filter_all) else {
             return;
         };
         let outcome = self.session.text_edit_save_as(&target, opts);
@@ -320,17 +342,18 @@ impl Glue {
             return;
         }
         if self.session.text_edit_pending().is_some() && self.session.text_edit_dirty() {
+            let tr = self.tr();
             let what = match self.session.text_edit_pending() {
-                Some(PendingAction::CloseWindow) => "关闭窗口前",
-                Some(PendingAction::ExitEditing) => "退出编辑前",
-                _ => "继续之前",
+                Some(PendingAction::CloseWindow) => tr.dlg_unsaved_close.as_str(),
+                Some(PendingAction::ExitEditing) => tr.dlg_unsaved_exit.as_str(),
+                _ => tr.dlg_unsaved_continue.as_str(),
             };
             self.show_dialog(
                 Dialog::Unsaved,
-                "有未保存的修改",
-                &format!("{what}是否保存对该文件的修改？"),
-                "保存",
-                "不保存",
+                &tr.dlg_unsaved_title,
+                &format!("{what}{}", tr.dlg_unsaved_question),
+                &tr.dlg_save,
+                &tr.dlg_discard,
                 "",
             );
         }
@@ -364,7 +387,7 @@ impl Glue {
             (Dialog::Conflict(_), 2) => {
                 self.close_dialog();
                 if let Err(e) = self.session.text_edit_reload() {
-                    self.set_status(&format!("重新载入失败：{e}"));
+                    self.set_status(&format!("{}{}", self.tr().status_reload_failed_prefix, localize(&e, self.lang())));
                 }
                 self.push_text();
                 (self.resync)();
@@ -385,25 +408,26 @@ impl Glue {
 
     fn periodic(&self) {
         if let Some(kind) = self.session.text_edit_check_external(false) {
+            let tr = self.tr();
             let msg = match kind {
-                ConflictKind::Modified => "磁盘文件已被外部修改：保存时将询问如何处理",
-                ConflictKind::Deleted => "磁盘文件已被删除或移动：保存时将询问如何处理",
+                ConflictKind::Modified => tr.status_ext_modified,
+                ConflictKind::Deleted => tr.status_ext_deleted,
             };
-            self.set_status(msg);
+            self.set_status(&msg);
         }
-        let autosave = self
-            .win()
-            .is_some_and(|w| w.global::<EditorState>().get_autosave());
+        // 自动保存开关读自全局配置，设置页切换后下一个周期即生效
+        let autosave = self.session.auto_save();
         if autosave && let Some(outcome) = self.session.text_edit_autosave_tick() {
+            let tr = self.tr();
             match outcome {
                 SaveOutcome::Saved => self.set_status(""),
-                SaveOutcome::Conflict(_) => self.set_status("自动保存已暂停：磁盘文件发生外部变化"),
-                SaveOutcome::Unrepresentable(_) => {
-                    self.set_status("自动保存已暂停：含原编码无法表示的字符，请手动保存")
-                }
-                SaveOutcome::NeedSaveAs(m) | SaveOutcome::Failed(m) => {
-                    self.set_status(&format!("自动保存失败：{m}"))
-                }
+                SaveOutcome::Conflict(_) => self.set_status(&tr.status_autosave_conflict),
+                SaveOutcome::Unrepresentable(_) => self.set_status(&tr.status_autosave_unrep),
+                SaveOutcome::NeedSaveAs(m) | SaveOutcome::Failed(m) => self.set_status(&format!(
+                    "{}{}",
+                    tr.status_autosave_failed_prefix,
+                    localize(&m, self.lang())
+                )),
             }
             self.state_sync();
         }
@@ -413,12 +437,13 @@ impl Glue {
 
     fn find_changed(&self, query: &str, cs: bool) {
         let n = self.session.text_edit_find_all(query, cs).len();
+        let tr = self.tr();
         let status = if query.is_empty() {
             String::new()
         } else if n == 0 {
-            "无匹配".to_string()
+            tr.find_none
         } else {
-            format!("{n} 处匹配")
+            format!("{n}{}", tr.find_matches_suffix)
         };
         if let Some(w) = self.win() {
             w.global::<EditorState>().set_find_status(status.into());
@@ -475,7 +500,7 @@ impl Glue {
         }
         if let Some(w) = self.win() {
             w.global::<EditorState>()
-                .set_find_status(format!("已替换 {n} 处").into());
+                .set_find_status(format!("{}{n}{}", self.tr().replaced_prefix, self.tr().replaced_suffix).into());
         }
         self.state_sync();
     }
@@ -483,7 +508,7 @@ impl Glue {
 
 /// 弹出系统“另存为”对话框；取消或非 Windows 返回 `None`。
 #[cfg(windows)]
-fn pick_save_path(current: &Path) -> Option<PathBuf> {
+fn pick_save_path(current: &Path, filter_label: &str) -> Option<PathBuf> {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use windows_sys::Win32::UI::Controls::Dialogs::{
         GetSaveFileNameW, OFN_EXPLORER, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST, OPENFILENAMEW,
@@ -500,7 +525,7 @@ fn pick_save_path(current: &Path) -> Option<PathBuf> {
         .map(|p| p.as_os_str().encode_wide().chain(Some(0)).collect())
         .unwrap_or_else(|| vec![0]);
     // 过滤器：成对以 0 结尾，整体以双 0 结束
-    let filter: Vec<u16> = "所有文件 (*.*)\0*.*\0\0".encode_utf16().collect();
+    let filter: Vec<u16> = format!("{filter_label}\0*.*\0\0").encode_utf16().collect();
 
     // SAFETY: OPENFILENAMEW 全零初始化后按文档填写必需字段；所有缓冲区在调用期间保持有效。
     let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
@@ -520,6 +545,20 @@ fn pick_save_path(current: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(not(windows))]
-fn pick_save_path(_current: &Path) -> Option<PathBuf> {
+fn pick_save_path(_current: &Path, _filter_label: &str) -> Option<PathBuf> {
     None
+}
+
+/// 编码无法表示字符的确认提示（按界面语言本地化）。
+fn unrep_message(
+    u: &anyfile::text_editor::encode::Unrepresentable,
+    enc: anyfile::text_viewer::TextEncoding,
+    _lang: Language,
+    tr: &UiStrings,
+) -> String {
+    let sample: String = u.chars.iter().take(5).collect();
+    tr.unrep_message_fmt
+        .replace("{line}", &u.first_line.to_string())
+        .replace("{enc}", enc.label())
+        .replace("{sample}", &sample)
 }

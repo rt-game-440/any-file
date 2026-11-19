@@ -5,6 +5,10 @@ export { TextRow, TextSegment }
 import { TextEditorView, EditorState } from "text_editor.slint";
 export { EditorState }
 import { AudioViewerPanel } from "audio_viewer.slint";
+import { Tr } from "i18n.slint";
+import { SettingsOverlay } from "settings_overlay.slint";
+
+export { Tr }
 
 component ActionPill inherits TouchArea {
     in property <string> label;
@@ -59,7 +63,7 @@ component ActionPill inherits TouchArea {
 export component MainWindow inherits Window {
     in property <bool> dark-mode: false;
     in property <string> app-title: "AnyFile";
-    in property <string> status-subtitle: "拖放任意文件到此处，或点击下方按钮打开";
+    in property <string> status-subtitle: Tr.welcome-subtitle;
     in property <string> renderer-label: "Skia";
     in property <bool> reduced-motion: false;
     in property <bool> is-maximized: false;
@@ -78,13 +82,40 @@ export component MainWindow inherits Window {
     in property <bool> can-go-prev: false;
     in property <bool> can-go-next: false;
     in property <bool> filter-by-category: true;
-    in property <string> switch-viewer-label: "以文本打开";
+    in property <string> switch-viewer-label: Tr.open-as-text;
     in property <bool> show-switch-viewer: false;
 
     // 兜底信息卡状态
     in property <string> fallback-size-text: "";
     in property <string> fallback-reason: "";
 
+    in property <string> toast-text: "";
+    in property <string> recent-hint: "";
+    in property <[string]> recent-names: [];
+    in property <[string]> recent-paths: [];
+    in property <bool> settings-open: false;
+    in property <int> theme-index: 0;
+    in property <int> language-index: 0;
+    in property <bool> auto-save: false;
+    in property <bool> recent-enabled: true;
+    in property <string> version-text: "";
+    in property <string> storage-text: "";
+    in property <string> update-text: "";
+    in property <bool> update-available: false;
+    in property <bool> update-checking: false;
+    callback delete-clicked();
+    callback copy-path-clicked();
+    callback reveal-clicked();
+    callback settings-clicked();
+    callback settings-closed();
+    callback theme-selected(int);
+    callback language-selected(int);
+    callback auto-save-toggled();
+    callback recent-toggled();
+    callback clear-recent-clicked();
+    callback check-update-clicked();
+    callback open-release-page-clicked();
+    callback open-default-apps-clicked();
     callback open-file-clicked();
     callback open-button-state-changed(bool, bool);
     callback minimize-clicked();
@@ -178,6 +209,10 @@ export component MainWindow inherits Window {
                 if (root.audio-key(event.text, event.modifiers.control)) {
                     return accept;
                 }
+            }
+            if (event.text == Key.Delete && root.active-viewer != "welcome" && !root.settings-open && !EditorState.active) {
+                root.delete-clicked();
+                return accept;
             }
             if (root.active-viewer != "welcome" && root.active-viewer != "audio" && !EditorState.active) {
                 if (event.text == Key.LeftArrow && root.can-go-prev) {
@@ -376,14 +411,14 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         ActionPill {
-                            label: "← 上一项";
+                            label: Tr.prev-item;
                             dark-mode: root.dark-mode;
                             enabled-state: root.can-go-prev;
                             clicked => { root.prev-sibling-clicked(); }
                         }
 
                         ActionPill {
-                            label: "下一项 →";
+                            label: Tr.next-item;
                             dark-mode: root.dark-mode;
                             enabled-state: root.can-go-next;
                             clicked => { root.next-sibling-clicked(); }
@@ -402,13 +437,37 @@ export component MainWindow inherits Window {
                         alignment: end;
 
                         ActionPill {
-                            label: root.filter-by-category ? "筛选：仅同类" : "筛选：全部格式";
+                            label: root.filter-by-category ? Tr.filter-same-kind : Tr.filter-all;
                             dark-mode: root.dark-mode;
                             clicked => { root.toggle-filter-clicked(); }
                         }
 
+                        if !EditorState.active : ActionPill {
+                            label: Tr.op-copy-path;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.copy-path-clicked(); }
+                        }
+
+                        if !EditorState.active : ActionPill {
+                            label: Tr.op-reveal;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.reveal-clicked(); }
+                        }
+
+                        if !EditorState.active : ActionPill {
+                            label: Tr.op-delete;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.delete-clicked(); }
+                        }
+
+                        if root.active-viewer != "unsupported" && !EditorState.active : ActionPill {
+                            label: Tr.open-with-other-app;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.open-with-other-app-clicked(); }
+                        }
+
                         if root.active-viewer == "text" && !EditorState.active : ActionPill {
-                            label: "编辑 Ctrl+E";
+                            label: Tr.editor-begin;
                             dark-mode: root.dark-mode;
                             clicked => { EditorState.begin(); }
                         }
@@ -484,6 +543,21 @@ export component MainWindow inherits Window {
                                     color: root.dark-mode ? #9DA5B4 : #5A6475;
                                 }
 
+                                VerticalLayout {
+                                    spacing: 2px;
+                                    for name[i] in root.recent-names : TouchArea {
+                                        height: 22px;
+                                        mouse-cursor: pointer;
+                                        clicked => { root.file-dropped(root.recent-paths[i]); }
+                                        Text {
+                                            text: name;
+                                            font-size: 12px;
+                                            horizontal-alignment: center;
+                                            color: parent.has-hover ? #2563EB : (root.dark-mode ? #9DA5B4 : #5A6475);
+                                        }
+                                    }
+                                }
+
                                 HorizontalLayout {
                                     alignment: center;
                                     padding-top: 8px;
@@ -519,7 +593,7 @@ export component MainWindow inherits Window {
                                                         : (root.dark-mode ? #3370E3 : #2563EB));
 
                                                 Text {
-                                                    text: "打开文件";
+                                                    text: Tr.open-file;
                                                     font-size: 14px;
                                                     font-weight: 600;
                                                     color: #FFFFFF;
@@ -552,7 +626,7 @@ export component MainWindow inherits Window {
                                 spacing: 12px;
 
                                 Text {
-                                    text: "无法直接预览此文件";
+                                    text: Tr.unsupported-title;
                                     font-size: 20px;
                                     font-weight: 700;
                                     color: root.dark-mode ? #F3F5F8 : #15181E;
@@ -571,14 +645,14 @@ export component MainWindow inherits Window {
                                 }
 
                                 Text {
-                                    text: "路径：" + root.current-file-path;
+                                    text: Tr.path-prefix + root.current-file-path;
                                     font-size: 12px;
                                     wrap: word-wrap;
                                     color: root.dark-mode ? #9DA5B4 : #5A6475;
                                 }
 
                                 Text {
-                                    text: "大小：" + root.fallback-size-text + "   •   探测结果：" + root.detected-format;
+                                    text: Tr.size-prefix + root.fallback-size-text + "   •   " + Tr.detected-prefix + root.detected-format;
                                     font-size: 12px;
                                     color: root.dark-mode ? #9DA5B4 : #5A6475;
                                 }
@@ -589,7 +663,7 @@ export component MainWindow inherits Window {
                                     alignment: start;
 
                                     ActionPill {
-                                        label: "用其他应用打开";
+                                        label: Tr.open-with-other-app;
                                         dark-mode: root.dark-mode;
                                         primary: true;
                                         clicked => { root.open-with-other-app-clicked(); }
@@ -660,7 +734,7 @@ export component MainWindow inherits Window {
                                 }
 
                                 Text {
-                                    text: "当前查看器：" + root.active-viewer + "   •   识别格式：" + root.detected-format;
+                                    text: Tr.current-viewer-prefix + root.active-viewer + "   •   " + Tr.recognized-prefix + root.detected-format;
                                     font-size: 13px;
                                     color: root.dark-mode ? #7EA6F8 : #2563EB;
                                 }
@@ -682,9 +756,9 @@ export component MainWindow inherits Window {
                     spacing: 16px;
 
                     Text {
-                        text: root.active-viewer == "welcome" ? "最近查看：暂无记录" : "快捷键：← / → 切换同目录文件";
+                        text: root.toast-text != "" ? root.toast-text : (root.active-viewer == "welcome" ? root.recent-hint : Tr.hint-siblings);
                         font-size: 12px;
-                        color: root.dark-mode ? #7B8394 : #7A8496;
+                        color: root.toast-text != "" ? #2563EB : (root.dark-mode ? #7B8394 : #7A8496);
                     }
 
                     Text {
@@ -694,12 +768,48 @@ export component MainWindow inherits Window {
                     }
 
                     Text {
-                        text: "渲染：" + root.renderer-label + (root.reduced-motion ? "（减弱动态效果）" : "");
+                        text: Tr.render-prefix + root.renderer-label + (root.reduced-motion ? Tr.reduced-motion-suffix : "");
                         font-size: 12px;
                         color: root.dark-mode ? #7B8394 : #7A8496;
+                    }
+
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.settings-clicked(); }
+                        Text {
+                            text: "⚙ " + Tr.settings;
+                            font-size: 12px;
+                            color: parent.has-hover ? #2563EB : (root.dark-mode ? #9DA5B4 : #5A6475);
+                        }
                     }
                 }
             }
         }
+    }
+
+    if root.settings-open : SettingsOverlay {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        dark-mode: root.dark-mode;
+        theme-index: root.theme-index;
+        language-index: root.language-index;
+        auto-save: root.auto-save;
+        recent-enabled: root.recent-enabled;
+        version-text: root.version-text;
+        storage-text: root.storage-text;
+        update-text: root.update-text;
+        update-available: root.update-available;
+        checking: root.update-checking;
+        close => { root.settings-closed(); }
+        theme-selected(i) => { root.theme-selected(i); }
+        language-selected(i) => { root.language-selected(i); }
+        auto-save-toggled => { root.auto-save-toggled(); }
+        recent-toggled => { root.recent-toggled(); }
+        clear-recent => { root.clear-recent-clicked(); }
+        check-update => { root.check-update-clicked(); }
+        open-release-page => { root.open-release-page-clicked(); }
+        open-default-apps => { root.open-default-apps-clicked(); }
     }
 }
