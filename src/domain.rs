@@ -118,7 +118,45 @@ impl MotionProfile {
         }
     }
 
-    /// 根据系统“减弱动态效果”标志生成动效配置
+    /// 敏捷跟手弹簧配置：近临界阻尼，几乎无过冲，适合视图切换与控件响应
+    pub fn snappy() -> Self {
+        Self {
+            stiffness: 480.0,
+            damping: 40.0,
+            mass: 1.0,
+            reduced_motion: false,
+        }
+    }
+
+    /// 柔和舒缓弹簧配置：平滑渐入渐出，适合欢迎页入场与悬浮栏显隐
+    pub fn smooth() -> Self {
+        Self {
+            stiffness: 240.0,
+            damping: 29.0,
+            mass: 1.0,
+            reduced_motion: false,
+        }
+    }
+
+    /// 轻弹性回弹弹簧配置：轻微欠阻尼，适合缩放回弹与按钮按压反馈
+    pub fn bouncy() -> Self {
+        Self {
+            stiffness: 320.0,
+            damping: 20.0,
+            mass: 1.0,
+            reduced_motion: false,
+        }
+    }
+
+    /// 瞬时切换配置：零过渡时长
+    pub fn instant() -> Self {
+        Self {
+            reduced_motion: true,
+            ..Self::fluid()
+        }
+    }
+
+    /// 根据系统“减弱动态效果”标志生成默认动效配置
     pub fn for_system_setting(reduced_motion: bool) -> Self {
         Self {
             reduced_motion,
@@ -126,9 +164,26 @@ impl MotionProfile {
         }
     }
 
+    /// 返回叠加了指定减弱动态效果标志的新配置
+    pub fn with_reduced_motion(mut self, reduced_motion: bool) -> Self {
+        self.reduced_motion = reduced_motion;
+        self
+    }
+
+    /// 当前配置是否应降级为瞬时切换
+    pub fn is_instant(&self) -> bool {
+        self.reduced_motion
+            || !self.stiffness.is_finite()
+            || !self.damping.is_finite()
+            || !self.mass.is_finite()
+            || self.stiffness <= 0.0
+            || self.mass <= 0.0
+            || self.damping < 0.0
+    }
+
     /// 动效时长倍率：开启减弱动态效果时为 `0.0`（瞬时切换），否则为 `1.0`
     pub fn duration_scale(&self) -> f32 {
-        if self.reduced_motion { 0.0 } else { 1.0 }
+        if self.is_instant() { 0.0 } else { 1.0 }
     }
 }
 
@@ -164,4 +219,49 @@ pub enum CloseDecision {
     AllowExit,
     /// 存在未保存修改，需要提示用户确认
     ConfirmUnsavedChanges,
+}
+
+/// 兜底信息卡的触发原因（纯二进制、损坏文件、不可读或暂不支持格式）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FallbackReason {
+    /// 纯二进制或未知内容格式
+    PureBinary,
+    /// 文件头或结构损坏
+    CorruptedFile(String),
+    /// 文件无法读取或权限受限
+    Unreadable(String),
+    /// 暂不支持的格式
+    UnsupportedFormat(String),
+}
+
+/// 纯二进制或损坏文件的友好兜底信息卡数据
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FallbackInfo {
+    /// 目标文件路径
+    pub path: PathBuf,
+    /// 文件字节大小
+    pub file_size: u64,
+    /// 兜底原因分类
+    pub reason: FallbackReason,
+    /// 面向用户的简体中文原因说明
+    pub reason_message: String,
+}
+
+impl FallbackInfo {
+    /// 将字节数格式化为易读的文件大小字符串
+    pub fn formatted_size(&self) -> String {
+        const KB: f64 = 1024.0;
+        const MB: f64 = KB * 1024.0;
+        const GB: f64 = MB * 1024.0;
+        let bytes = self.file_size as f64;
+        if bytes >= GB {
+            format!("{:.2} GB", bytes / GB)
+        } else if bytes >= MB {
+            format!("{:.2} MB", bytes / MB)
+        } else if bytes >= KB {
+            format!("{:.1} KB", bytes / KB)
+        } else {
+            format!("{} B", self.file_size)
+        }
+    }
 }

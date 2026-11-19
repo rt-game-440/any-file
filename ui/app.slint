@@ -1,4 +1,54 @@
-// AnyFile 空态欢迎/拖放窗口骨架（工单 #2）
+// AnyFile 主窗口视图（含无边框自定义标题栏、物理弹簧动效绑定、同目录导航栏、查看器切换入口与兜底信息卡）
+
+component ActionPill inherits TouchArea {
+    in property <string> label;
+    in property <bool> dark-mode: false;
+    in property <bool> primary: false;
+    in property <bool> enabled-state: true;
+
+    height: 34px;
+    mouse-cursor: root.enabled-state ? pointer : default;
+    enabled: root.enabled-state;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 8px;
+        border-width: root.primary ? 0px : 1px;
+        border-color: root.dark-mode ? #343944 : #D6DCE6;
+        background: !root.enabled-state
+            ? (root.dark-mode ? #20232A : #ECEFF4)
+            : root.primary
+                ? (parent.pressed
+                    ? (root.dark-mode ? #2A63C9 : #1D53B8)
+                    : (parent.has-hover
+                        ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
+                        : (root.dark-mode ? #3370E3 : #2563EB)))
+                : (parent.pressed
+                    ? (root.dark-mode ? #2B303B : #DDE3EC)
+                    : (parent.has-hover
+                        ? (root.dark-mode ? #252A34 : #E7ECF3)
+                        : (root.dark-mode ? #1E2129 : #FFFFFF)));
+
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            alignment: center;
+
+            Text {
+                text: root.label;
+                font-size: 13px;
+                font-weight: root.primary ? 600 : 500;
+                vertical-alignment: center;
+                color: !root.enabled-state
+                    ? (root.dark-mode ? #5A6272 : #9BA4B5)
+                    : root.primary
+                        ? #FFFFFF
+                        : (root.dark-mode ? #E2E6EE : #1E2430);
+            }
+        }
+    }
+}
 
 export component MainWindow inherits Window {
     in property <bool> dark-mode: false;
@@ -6,115 +56,509 @@ export component MainWindow inherits Window {
     in property <string> status-subtitle: "拖放任意文件到此处，或点击下方按钮打开";
     in property <string> renderer-label: "Skia";
     in property <bool> reduced-motion: false;
+    in property <bool> is-maximized: false;
+    in property <bool> max-button-hovered: false;
+    // 由 Rust 统一物理弹簧驱动实时写入的动效状态
+    in property <float> welcome-progress: 1.0;
+    in property <float> view-transition: 1.0;
+    in property <float> button-scale: 1.0;
+
+    // 视图与文件项状态（工单 #5）
+    in property <string> active-viewer: "welcome";
+    in property <string> current-file-name: "";
+    in property <string> current-file-path: "";
+    in property <string> detected-format: "";
+    in property <string> sibling-position-text: "";
+    in property <bool> can-go-prev: false;
+    in property <bool> can-go-next: false;
+    in property <bool> filter-by-category: true;
+    in property <string> switch-viewer-label: "以文本打开";
+    in property <bool> show-switch-viewer: false;
+
+    // 兜底信息卡状态
+    in property <string> fallback-size-text: "";
+    in property <string> fallback-reason: "";
 
     callback open-file-clicked();
+    callback open-button-state-changed(bool, bool);
+    callback minimize-clicked();
+    callback maximize-clicked();
+    callback close-clicked();
+    callback prev-sibling-clicked();
+    callback next-sibling-clicked();
+    callback toggle-filter-clicked();
+    callback switch-viewer-clicked();
+    callback open-with-other-app-clicked();
+    callback file-dropped(string);
 
+    no-frame: true;
     title: root.app-title;
-    preferred-width: 760px;
-    preferred-height: 520px;
-    min-width: 480px;
-    min-height: 360px;
+    preferred-width: 780px;
+    preferred-height: 540px;
+    min-width: 500px;
+    min-height: 380px;
     background: root.dark-mode ? #141518 : #F6F7F9;
 
-    // 极简欢迎 / 拖放主区域
-    VerticalLayout {
-        padding: 36px;
-        spacing: 20px;
-        alignment: center;
+    key-handler := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            if (root.active-viewer != "welcome") {
+                if (event.text == Key.LeftArrow && root.can-go-prev) {
+                    root.prev-sibling-clicked();
+                    return accept;
+                }
+                if (event.text == Key.RightArrow && root.can-go-next) {
+                    root.next-sibling-clicked();
+                    return accept;
+                }
+            }
+            return reject;
+        }
 
-        // 拖放区卡片
-        HorizontalLayout {
-            alignment: center;
+        VerticalLayout {
+            padding: 0px;
+            spacing: 0px;
 
+            // 无边框自定义标题栏（高度 36px，与 TitleBarMetrics::default().height_logical 严格对齐）
             Rectangle {
-                preferred-width: 520px;
-                min-width: 360px;
-                max-width: 520px;
-                height: 280px;
-                border-radius: 18px;
-                border-width: 1.5px;
-                border-color: root.dark-mode ? #2C3038 : #D9DEE7;
-                background: root.dark-mode ? #1C1E24 : #FFFFFF;
+                height: 36px;
+                background: root.dark-mode ? #181A1F : #ECEFF4;
 
-                VerticalLayout {
-                    padding: 32px;
-                    spacing: 14px;
-                    alignment: center;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 0px;
+                    spacing: 0px;
 
-                    Text {
-                        text: "AnyFile";
-                        font-size: 28px;
-                        font-weight: 700;
-                        horizontal-alignment: center;
-                        color: root.dark-mode ? #F3F5F8 : #15181E;
-                    }
-
-                    Text {
-                        text: root.status-subtitle;
-                        font-size: 14px;
-                        horizontal-alignment: center;
-                        wrap: word-wrap;
-                        color: root.dark-mode ? #9DA5B4 : #5A6475;
-                    }
-
+                    // 左侧标题区域（由 Win32 WM_NCHITTEST 映射为 HTCAPTION，支持拖拽/双击最大化/Aero Snap）
                     HorizontalLayout {
-                        alignment: center;
-                        padding-top: 8px;
+                        horizontal-stretch: 1;
+                        spacing: 8px;
+                        alignment: start;
 
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: root.dark-mode ? #3B82F6 : #2563EB;
+                        }
+
+                        Text {
+                            text: root.app-title;
+                            font-size: 12.5px;
+                            font-weight: 500;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            color: root.dark-mode ? #D8DDE8 : #262C36;
+                        }
+                    }
+
+                    // 右侧原生窗口控制按钮组（每枚宽 46px，与 TitleBarMetrics::default().button_width_logical 对齐）
+                    HorizontalLayout {
+                        spacing: 0px;
+
+                        // 最小化按钮
                         TouchArea {
-                            width: 156px;
-                            height: 40px;
-                            mouse-cursor: pointer;
+                            width: 46px;
+                            height: 36px;
                             clicked => {
-                                root.open-file-clicked();
+                                root.minimize-clicked();
                             }
 
                             Rectangle {
                                 width: parent.width;
                                 height: parent.height;
-                                border-radius: 10px;
                                 background: parent.pressed
-                                    ? (root.dark-mode ? #2A63C9 : #1D53B8)
+                                    ? (root.dark-mode ? #2B303A : #D5DBE5)
                                     : (parent.has-hover
-                                        ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
-                                        : (root.dark-mode ? #3370E3 : #2563EB));
+                                        ? (root.dark-mode ? #232730 : #E0E5EE)
+                                        : transparent);
+
+                                Rectangle {
+                                    width: 10px;
+                                    height: 1px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    background: root.dark-mode ? #DCE1EB : #252B36;
+                                }
+                            }
+                        }
+
+                        // 最大化 / 还原按钮（Win32 WM_NCHITTEST 返回 HTMAXBUTTON 以保留 Win11 Snap Layouts）
+                        TouchArea {
+                            width: 46px;
+                            height: 36px;
+                            clicked => {
+                                root.maximize-clicked();
+                            }
+
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                background: parent.pressed
+                                    ? (root.dark-mode ? #2B303A : #D5DBE5)
+                                    : ((parent.has-hover || root.max-button-hovered)
+                                        ? (root.dark-mode ? #232730 : #E0E5EE)
+                                        : transparent);
+
+                                if !root.is-maximized : Rectangle {
+                                    width: 10px;
+                                    height: 10px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    border-width: 1px;
+                                    border-color: root.dark-mode ? #DCE1EB : #252B36;
+                                    background: transparent;
+                                }
+
+                                if root.is-maximized : Rectangle {
+                                    width: 11px;
+                                    height: 11px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    background: transparent;
+
+                                    // 后层方框
+                                    Rectangle {
+                                        x: 2px;
+                                        y: 0px;
+                                        width: 9px;
+                                        height: 9px;
+                                        border-width: 1px;
+                                        border-color: root.dark-mode ? #DCE1EB : #252B36;
+                                        background: transparent;
+                                    }
+
+                                    // 前层方框
+                                    Rectangle {
+                                        x: 0px;
+                                        y: 2px;
+                                        width: 9px;
+                                        height: 9px;
+                                        border-width: 1px;
+                                        border-color: root.dark-mode ? #DCE1EB : #252B36;
+                                        background: root.dark-mode ? #181A1F : #ECEFF4;
+                                    }
+                                }
+                            }
+                        }
+
+                        // 关闭按钮
+                        close-ta := TouchArea {
+                            width: 46px;
+                            height: 36px;
+                            clicked => {
+                                root.close-clicked();
+                            }
+
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                background: close-ta.pressed
+                                    ? #B02418
+                                    : (close-ta.has-hover ? #C42B1C : transparent);
 
                                 Text {
-                                    text: "打开文件";
-                                    font-size: 14px;
-                                    font-weight: 600;
-                                    color: #FFFFFF;
+                                    text: "✕";
+                                    font-size: 11px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
+                                    color: (close-ta.has-hover || close-ta.pressed)
+                                        ? #FFFFFF
+                                        : (root.dark-mode ? #DCE1EB : #252B36);
                                 }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // 底部极简提示条（最近查看空态 + 渲染器/主题摘要）
-        HorizontalLayout {
-            alignment: center;
-            spacing: 16px;
-
-            Text {
-                text: "最近查看：暂无记录";
-                font-size: 12px;
-                color: root.dark-mode ? #7B8394 : #7A8496;
+            // 标题栏底部分隔线
+            Rectangle {
+                height: 1px;
+                background: root.dark-mode ? #252932 : #DCE1EA;
             }
 
-            Text {
-                text: "•";
-                font-size: 12px;
-                color: root.dark-mode ? #4E5563 : #BCC4D1;
-            }
+            // 主内容区（随物理弹簧平滑入场与视图过渡）
+            VerticalLayout {
+                vertical-stretch: 1;
+                padding-left: 24px;
+                padding-right: 24px;
+                padding-top: 24px + (1.0 - root.welcome-progress) * 14px;
+                padding-bottom: 24px;
+                spacing: 16px;
+                opacity: clamp(root.welcome-progress * root.view-transition, 0.0, 1.0);
 
-            Text {
-                text: "渲染：" + root.renderer-label + (root.reduced-motion ? "（减弱动态效果）" : "");
-                font-size: 12px;
-                color: root.dark-mode ? #7B8394 : #7A8496;
+                // 顶部导航与操作工具栏（仅在已打开文件时显示）
+                if root.active-viewer != "welcome" : HorizontalLayout {
+                    spacing: 8px;
+                    alignment: space-between;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+
+                        ActionPill {
+                            label: "← 上一项";
+                            dark-mode: root.dark-mode;
+                            enabled-state: root.can-go-prev;
+                            clicked => { root.prev-sibling-clicked(); }
+                        }
+
+                        ActionPill {
+                            label: "下一项 →";
+                            dark-mode: root.dark-mode;
+                            enabled-state: root.can-go-next;
+                            clicked => { root.next-sibling-clicked(); }
+                        }
+
+                        if root.sibling-position-text != "" : Text {
+                            text: root.sibling-position-text;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            color: root.dark-mode ? #9DA5B4 : #5A6475;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
+
+                        ActionPill {
+                            label: root.filter-by-category ? "筛选：仅同类" : "筛选：全部格式";
+                            dark-mode: root.dark-mode;
+                            clicked => { root.toggle-filter-clicked(); }
+                        }
+
+                        if root.show-switch-viewer : ActionPill {
+                            label: root.switch-viewer-label;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.switch-viewer-clicked(); }
+                        }
+                    }
+                }
+
+                // 中央主内容区：欢迎空态 / 兜底信息卡 / 已识别媒体视图
+                VerticalLayout {
+                    vertical-stretch: 1;
+                    alignment: center;
+
+                    // 1. 极简欢迎 / 拖放空态（保留物理弹性按钮反馈）
+                    if root.active-viewer == "welcome" : HorizontalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            preferred-width: 520px;
+                            min-width: 360px;
+                            max-width: 520px;
+                            height: 280px;
+                            border-radius: 18px;
+                            border-width: 1.5px;
+                            border-color: root.dark-mode ? #2C3038 : #D9DEE7;
+                            background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+                            VerticalLayout {
+                                padding: 32px;
+                                spacing: 14px;
+                                alignment: center;
+
+                                Text {
+                                    text: "AnyFile";
+                                    font-size: 28px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    color: root.dark-mode ? #F3F5F8 : #15181E;
+                                }
+
+                                Text {
+                                    text: root.status-subtitle;
+                                    font-size: 14px;
+                                    horizontal-alignment: center;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                                }
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    padding-top: 8px;
+
+                                    Rectangle {
+                                        width: 164px;
+                                        height: 44px;
+
+                                        open-touch := TouchArea {
+                                            width: 156px * clamp(root.button-scale, 0.85, 1.15);
+                                            height: 40px * clamp(root.button-scale, 0.85, 1.15);
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.open-file-clicked();
+                                            }
+                                            changed has-hover => {
+                                                root.open-button-state-changed(self.has-hover, self.pressed);
+                                            }
+                                            changed pressed => {
+                                                root.open-button-state-changed(self.has-hover, self.pressed);
+                                            }
+
+                                            Rectangle {
+                                                width: parent.width;
+                                                height: parent.height;
+                                                border-radius: 10px;
+                                                background: open-touch.pressed
+                                                    ? (root.dark-mode ? #2A63C9 : #1D53B8)
+                                                    : (open-touch.has-hover
+                                                        ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
+                                                        : (root.dark-mode ? #3370E3 : #2563EB));
+
+                                                Text {
+                                                    text: "打开文件";
+                                                    font-size: 14px;
+                                                    font-weight: 600;
+                                                    color: #FFFFFF;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. 纯二进制或损坏文件的友好兜底信息卡
+                    if root.active-viewer == "unsupported" : HorizontalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            preferred-width: 560px;
+                            min-width: 380px;
+                            max-width: 560px;
+                            border-radius: 18px;
+                            border-width: 1.5px;
+                            border-color: root.dark-mode ? #383034 : #E5D7D9;
+                            background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+                            VerticalLayout {
+                                padding: 28px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: "无法直接预览此文件";
+                                    font-size: 20px;
+                                    font-weight: 700;
+                                    color: root.dark-mode ? #F3F5F8 : #15181E;
+                                }
+
+                                Text {
+                                    text: root.fallback-reason;
+                                    font-size: 14px;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #C9A4A8 : #8C3D47;
+                                }
+
+                                Rectangle {
+                                    height: 1px;
+                                    background: root.dark-mode ? #2C3038 : #E6EAF0;
+                                }
+
+                                Text {
+                                    text: "路径：" + root.current-file-path;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                                }
+
+                                Text {
+                                    text: "大小：" + root.fallback-size-text + "   •   探测结果：" + root.detected-format;
+                                    font-size: 12px;
+                                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                                }
+
+                                HorizontalLayout {
+                                    padding-top: 8px;
+                                    spacing: 10px;
+                                    alignment: start;
+
+                                    ActionPill {
+                                        label: "用其他应用打开";
+                                        dark-mode: root.dark-mode;
+                                        primary: true;
+                                        clicked => { root.open-with-other-app-clicked(); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. 已探测媒体视图（图像 / 视频 / 音频 / 文本占位面板）
+                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" : HorizontalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            preferred-width: 560px;
+                            min-width: 380px;
+                            max-width: 560px;
+                            border-radius: 18px;
+                            border-width: 1.5px;
+                            border-color: root.dark-mode ? #2C3038 : #D9DEE7;
+                            background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+                            VerticalLayout {
+                                padding: 28px;
+                                spacing: 10px;
+
+                                Text {
+                                    text: root.current-file-name;
+                                    font-size: 20px;
+                                    font-weight: 700;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #F3F5F8 : #15181E;
+                                }
+
+                                Text {
+                                    text: "当前查看器：" + root.active-viewer + "   •   识别格式：" + root.detected-format;
+                                    font-size: 13px;
+                                    color: root.dark-mode ? #7EA6F8 : #2563EB;
+                                }
+
+                                Text {
+                                    text: root.current-file-path;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 底部极简提示条
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 16px;
+
+                    Text {
+                        text: root.active-viewer == "welcome" ? "最近查看：暂无记录" : "快捷键：← / → 切换同目录文件";
+                        font-size: 12px;
+                        color: root.dark-mode ? #7B8394 : #7A8496;
+                    }
+
+                    Text {
+                        text: "•";
+                        font-size: 12px;
+                        color: root.dark-mode ? #4E5563 : #BCC4D1;
+                    }
+
+                    Text {
+                        text: "渲染：" + root.renderer-label + (root.reduced-motion ? "（减弱动态效果）" : "");
+                        font-size: 12px;
+                        color: root.dark-mode ? #7B8394 : #7A8496;
+                    }
+                }
             }
         }
     }

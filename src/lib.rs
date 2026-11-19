@@ -3,10 +3,14 @@
 
 pub mod domain;
 pub mod fixtures;
+pub mod motion;
 pub mod platform;
 pub mod ports;
+pub mod probing;
 pub mod session;
 pub mod video;
+pub mod sibling;
+pub mod window_shell;
 
 slint::include_modules!();
 
