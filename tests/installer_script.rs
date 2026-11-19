@@ -53,7 +53,6 @@ fn installer_extension_lists_match_probing_rs() {
     let body = &probing[start..probing[start..].find("\n}\n").unwrap() + start];
     let s = iss();
     // 逐类对照：probing.rs 中每个 match 分支的扩展名集合
-    let arms: Vec<&str> = body.split("=> Some(MediaCategory::").skip(0).collect();
     let cats = ["Image", "Video", "Audio", "Text"];
     let defs = ["ExtImage", "ExtVideo", "ExtAudio", "ExtText"];
     let mut prev_end = body.find("match ext.as_str()").unwrap();
@@ -76,7 +75,6 @@ fn installer_extension_lists_match_probing_rs() {
         assert_eq!(exts, want, "{cat} 扩展名清单与 probing.rs 不一致");
         prev_end = end + marker.len();
     }
-    let _ = arms;
 }
 
 #[test]
