@@ -415,6 +415,14 @@ fn sync_text_view(window: &MainWindow, session: &AppSession) {
     window.set_text_notice(notice.into());
 }
 
+/// 把视图滚动到当前匹配行（居中）。
+fn scroll_to_current_match(window: &MainWindow, session: &AppSession) {
+    if let Some(m) = session.text_find_state().current_match() {
+        window.set_text_scroll_line(m.line_index as i32);
+        window.set_text_scroll_tick(window.get_text_scroll_tick().wrapping_add(1));
+    }
+}
+
 fn wire_text_view(window: &MainWindow, session: &Arc<AppSession>) {
     {
         let session = Arc::clone(session);
@@ -423,6 +431,7 @@ fn wire_text_view(window: &MainWindow, session: &Arc<AppSession>) {
             session.text_find(q.as_str(), case);
             if let Some(win) = weak.upgrade() {
                 sync_text_view(&win, &session);
+                scroll_to_current_match(&win, &session);
             }
         });
     }
@@ -437,6 +446,7 @@ fn wire_text_view(window: &MainWindow, session: &Arc<AppSession>) {
             }
             if let Some(win) = weak.upgrade() {
                 sync_text_view(&win, &session);
+                scroll_to_current_match(&win, &session);
             }
         };
         if next {

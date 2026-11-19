@@ -272,3 +272,13 @@ fn large_file_is_readonly_with_bounded_preview_and_long_line_truncated() {
     assert!(doc.lines[0].is_truncated);
     assert!(doc.lines[0].display_text.chars().count() <= MAX_LINE_DISPLAY_CHARS + 1);
 }
+
+#[test]
+fn centered_scroll_offset_centers_and_clamps() {
+    use anyfile::text_viewer::centered_scroll_offset as f;
+    // 100 行 × 20px，可视 200px：第 50 行居中
+    assert_eq!(f(50, 20.0, 200.0, 100), 50.0 * 20.0 - 90.0);
+    assert_eq!(f(0, 20.0, 200.0, 100), 0.0);
+    assert_eq!(f(99, 20.0, 200.0, 100), 1800.0);
+    assert_eq!(f(3, 20.0, 400.0, 5), 0.0, "内容不足一屏不滚动");
+}

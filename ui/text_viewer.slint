@@ -56,6 +56,16 @@ export component TextViewer inherits Rectangle {
     property <length> row-height: root.font-size * 1.55;
     property <length> gutter-width: root.font-size * 0.62 * (root.gutter-digits + 2);
 
+    in property <int> scroll-line: -1;
+    in property <int> scroll-tick: 0;
+    changed scroll-tick => {
+        if (root.scroll-line >= 0) {
+            // 与 Rust 侧 centered_scroll_offset 同一公式：目标行居中并限幅
+            list.viewport-y = -max(0px, min(
+                root.scroll-line * root.row-height - (list.visible-height - root.row-height) / 2,
+                max(0px, list.viewport-height - list.visible-height)));
+        }
+    }
     in property <int> focus-find-tick: 0;
     changed focus-find-tick => {
         root.find-open = true;

@@ -67,6 +67,20 @@ impl TextFindState {
     }
 }
 
+/// 计算使 `line_index` 行垂直居中的滚动偏移（正值，Slint 的 `viewport-y` 取其相反数），
+/// 并限制在 `[0, 内容高度 - 可视高度]`。
+pub fn centered_scroll_offset(
+    line_index: usize,
+    row_height: f32,
+    viewport_height: f32,
+    total_lines: usize,
+) -> f32 {
+    let content = row_height * total_lines as f32;
+    let max_off = (content - viewport_height).max(0.0);
+    let target = line_index as f32 * row_height - (viewport_height - row_height) / 2.0;
+    target.clamp(0.0, max_off)
+}
+
 /// 在文档中查找 `query`，默认将第一个匹配设为当前项。
 pub fn find_in_document(doc: &TextDocument, query: &str, case_sensitive: bool) -> TextFindState {
     let mut state = TextFindState {

@@ -101,6 +101,8 @@ export component MainWindow inherits Window {
     in property <string> text-notice: "";
     in property <string> text-find-status: "";
     in property <int> text-gutter-digits: 3;
+    in property <int> text-scroll-line: -1;
+    in property <int> text-scroll-tick: 0;
     callback text-find-changed(string, bool);
     callback text-find-next();
     callback text-find-prev();
@@ -382,6 +384,8 @@ export component MainWindow inherits Window {
 
                     if root.active-viewer == "text" : TextViewer {
                         focus-find-tick: root.find-tick;
+                        scroll-line: root.text-scroll-line;
+                        scroll-tick: root.text-scroll-tick;
                         vertical-stretch: 1;
                         rows: root.text-rows;
                         dark-mode: root.dark-mode;

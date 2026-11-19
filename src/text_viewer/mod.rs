@@ -16,7 +16,7 @@ use std::io::Read;
 use std::path::Path;
 
 pub use encoding::{DecodedText, TextEncoding, decode_bytes, detect_encoding};
-pub use find::{FindMatch, MAX_FIND_MATCHES, TextFindState, find_in_document};
+pub use find::{centered_scroll_offset, FindMatch, MAX_FIND_MATCHES, TextFindState, find_in_document};
 pub use highlight::{HighlightToken, SyntaxKind, TokenKind, tokenize_document_lines};
 pub use zoom::{DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE, clamp_font_size, zoom_for_wheel};
 
