@@ -1,4 +1,4 @@
-// AnyFile 空态欢迎/拖放窗口与物理弹簧动效绑定（工单 #2 / #4）
+// AnyFile 无边框自定义标题栏、欢迎/拖放窗口与物理弹簧动效绑定（工单 #2 / #3 / #4）
 
 export component MainWindow inherits Window {
     in property <bool> dark-mode: false;
@@ -6,6 +6,8 @@ export component MainWindow inherits Window {
     in property <string> status-subtitle: "拖放任意文件到此处，或点击下方按钮打开";
     in property <string> renderer-label: "Skia";
     in property <bool> reduced-motion: false;
+    in property <bool> is-maximized: false;
+    in property <bool> max-button-hovered: false;
     // 由 Rust 统一物理弹簧驱动实时写入的动效状态
     in property <float> welcome-progress: 1.0;
     in property <float> view-transition: 1.0;
@@ -13,7 +15,11 @@ export component MainWindow inherits Window {
 
     callback open-file-clicked();
     callback open-button-state-changed(bool, bool);
+    callback minimize-clicked();
+    callback maximize-clicked();
+    callback close-clicked();
 
+    no-frame: true;
     title: root.app-title;
     preferred-width: 760px;
     preferred-height: 520px;
@@ -21,94 +27,157 @@ export component MainWindow inherits Window {
     min-height: 360px;
     background: root.dark-mode ? #141518 : #F6F7F9;
 
-    // 极简欢迎 / 拖放主区域（随物理弹簧平滑入场与视图过渡）
     VerticalLayout {
-        padding-left: 36px;
-        padding-right: 36px;
-        padding-top: 36px + (1.0 - root.welcome-progress) * 14px;
-        padding-bottom: 36px;
-        spacing: 20px;
-        alignment: center;
-        opacity: clamp(root.welcome-progress * root.view-transition, 0.0, 1.0);
+        padding: 0px;
+        spacing: 0px;
 
-        // 拖放区卡片
-        HorizontalLayout {
-            alignment: center;
+        // 无边框自定义标题栏（高度 36px，与 TitleBarMetrics::default().height_logical 严格对齐）
+        Rectangle {
+            height: 36px;
+            background: root.dark-mode ? #181A1F : #ECEFF4;
 
-            Rectangle {
-                preferred-width: 520px;
-                min-width: 360px;
-                max-width: 520px;
-                height: 280px;
-                border-radius: 18px;
-                border-width: 1.5px;
-                border-color: root.dark-mode ? #2C3038 : #D9DEE7;
-                background: root.dark-mode ? #1C1E24 : #FFFFFF;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 0px;
+                spacing: 0px;
 
-                VerticalLayout {
-                    padding: 32px;
-                    spacing: 14px;
-                    alignment: center;
+                // 左侧标题区域（由 Win32 WM_NCHITTEST 映射为 HTCAPTION，支持拖拽/双击最大化/Aero Snap）
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 8px;
+                    alignment: start;
 
-                    Text {
-                        text: "AnyFile";
-                        font-size: 28px;
-                        font-weight: 700;
-                        horizontal-alignment: center;
-                        color: root.dark-mode ? #F3F5F8 : #15181E;
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 4px;
+                        background: root.dark-mode ? #3B82F6 : #2563EB;
                     }
 
                     Text {
-                        text: root.status-subtitle;
-                        font-size: 14px;
-                        horizontal-alignment: center;
-                        wrap: word-wrap;
-                        color: root.dark-mode ? #9DA5B4 : #5A6475;
+                        text: root.app-title;
+                        font-size: 12.5px;
+                        font-weight: 500;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        color: root.dark-mode ? #D8DDE8 : #262C36;
                     }
+                }
 
-                    HorizontalLayout {
-                        alignment: center;
-                        padding-top: 8px;
+                // 右侧原生窗口控制按钮组（每枚宽 46px，与 TitleBarMetrics::default().button_width_logical 对齐）
+                HorizontalLayout {
+                    spacing: 0px;
+
+                    // 最小化按钮
+                    TouchArea {
+                        width: 46px;
+                        height: 36px;
+                        clicked => {
+                            root.minimize-clicked();
+                        }
 
                         Rectangle {
-                            width: 164px;
-                            height: 44px;
+                            width: parent.width;
+                            height: parent.height;
+                            background: parent.pressed
+                                ? (root.dark-mode ? #2B303A : #D5DBE5)
+                                : (parent.has-hover
+                                    ? (root.dark-mode ? #232730 : #E0E5EE)
+                                    : transparent);
 
-                            open-touch := TouchArea {
-                                width: 156px * clamp(root.button-scale, 0.85, 1.15);
-                                height: 40px * clamp(root.button-scale, 0.85, 1.15);
+                            Rectangle {
+                                width: 10px;
+                                height: 1px;
                                 x: (parent.width - self.width) / 2;
                                 y: (parent.height - self.height) / 2;
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    root.open-file-clicked();
-                                }
-                                changed has-hover => {
-                                    root.open-button-state-changed(self.has-hover, self.pressed);
-                                }
-                                changed pressed => {
-                                    root.open-button-state-changed(self.has-hover, self.pressed);
-                                }
+                                background: root.dark-mode ? #DCE1EB : #252B36;
+                            }
+                        }
+                    }
 
+                    // 最大化 / 还原按钮（Win32 WM_NCHITTEST 返回 HTMAXBUTTON 以保留 Win11 Snap Layouts）
+                    TouchArea {
+                        width: 46px;
+                        height: 36px;
+                        clicked => {
+                            root.maximize-clicked();
+                        }
+
+                        Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            background: parent.pressed
+                                ? (root.dark-mode ? #2B303A : #D5DBE5)
+                                : ((parent.has-hover || root.max-button-hovered)
+                                    ? (root.dark-mode ? #232730 : #E0E5EE)
+                                    : transparent);
+
+                            if !root.is-maximized : Rectangle {
+                                width: 10px;
+                                height: 10px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                border-width: 1px;
+                                border-color: root.dark-mode ? #DCE1EB : #252B36;
+                                background: transparent;
+                            }
+
+                            if root.is-maximized : Rectangle {
+                                width: 11px;
+                                height: 11px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                background: transparent;
+
+                                // 后层方框
                                 Rectangle {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    border-radius: 10px;
-                                    background: open-touch.pressed
-                                        ? (root.dark-mode ? #2A63C9 : #1D53B8)
-                                        : (open-touch.has-hover
-                                            ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
-                                            : (root.dark-mode ? #3370E3 : #2563EB));
-
-                                    Text {
-                                        text: "打开文件";
-                                        font-size: 14px;
-                                        font-weight: 600;
-                                        color: #FFFFFF;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
+                                    x: 2px;
+                                    y: 0px;
+                                    width: 9px;
+                                    height: 9px;
+                                    border-width: 1px;
+                                    border-color: root.dark-mode ? #DCE1EB : #252B36;
+                                    background: transparent;
                                 }
+
+                                // 前层方框
+                                Rectangle {
+                                    x: 0px;
+                                    y: 2px;
+                                    width: 9px;
+                                    height: 9px;
+                                    border-width: 1px;
+                                    border-color: root.dark-mode ? #DCE1EB : #252B36;
+                                    background: root.dark-mode ? #181A1F : #ECEFF4;
+                                }
+                            }
+                        }
+                    }
+
+                    // 关闭按钮
+                    close-ta := TouchArea {
+                        width: 46px;
+                        height: 36px;
+                        clicked => {
+                            root.close-clicked();
+                        }
+
+                        Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            background: close-ta.pressed
+                                ? #B02418
+                                : (close-ta.has-hover ? #C42B1C : transparent);
+
+                            Text {
+                                text: "✕";
+                                font-size: 11px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                color: (close-ta.has-hover || close-ta.pressed)
+                                    ? #FFFFFF
+                                    : (root.dark-mode ? #DCE1EB : #252B36);
                             }
                         }
                     }
@@ -116,27 +185,130 @@ export component MainWindow inherits Window {
             }
         }
 
-        // 底部极简提示条（最近查看空态 + 渲染器/主题摘要）
-        HorizontalLayout {
+        // 标题栏底部分隔线
+        Rectangle {
+            height: 1px;
+            background: root.dark-mode ? #252932 : #DCE1EA;
+        }
+
+        // 极简欢迎 / 拖放主区域（随物理弹簧平滑入场与视图过渡）
+        VerticalLayout {
+            vertical-stretch: 1;
+            padding-left: 32px;
+            padding-right: 32px;
+            padding-top: 32px + (1.0 - root.welcome-progress) * 14px;
+            padding-bottom: 32px;
+            spacing: 20px;
             alignment: center;
-            spacing: 16px;
+            opacity: clamp(root.welcome-progress * root.view-transition, 0.0, 1.0);
 
-            Text {
-                text: "最近查看：暂无记录";
-                font-size: 12px;
-                color: root.dark-mode ? #7B8394 : #7A8496;
+            // 拖放区卡片
+            HorizontalLayout {
+                alignment: center;
+
+                Rectangle {
+                    preferred-width: 520px;
+                    min-width: 360px;
+                    max-width: 520px;
+                    height: 280px;
+                    border-radius: 18px;
+                    border-width: 1.5px;
+                    border-color: root.dark-mode ? #2C3038 : #D9DEE7;
+                    background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+                    VerticalLayout {
+                        padding: 32px;
+                        spacing: 14px;
+                        alignment: center;
+
+                        Text {
+                            text: "AnyFile";
+                            font-size: 28px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            color: root.dark-mode ? #F3F5F8 : #15181E;
+                        }
+
+                        Text {
+                            text: root.status-subtitle;
+                            font-size: 14px;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                            color: root.dark-mode ? #9DA5B4 : #5A6475;
+                        }
+
+                        HorizontalLayout {
+                            alignment: center;
+                            padding-top: 8px;
+
+                            Rectangle {
+                                width: 164px;
+                                height: 44px;
+
+                                open-touch := TouchArea {
+                                    width: 156px * clamp(root.button-scale, 0.85, 1.15);
+                                    height: 40px * clamp(root.button-scale, 0.85, 1.15);
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.open-file-clicked();
+                                    }
+                                    changed has-hover => {
+                                        root.open-button-state-changed(self.has-hover, self.pressed);
+                                    }
+                                    changed pressed => {
+                                        root.open-button-state-changed(self.has-hover, self.pressed);
+                                    }
+
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 10px;
+                                        background: open-touch.pressed
+                                            ? (root.dark-mode ? #2A63C9 : #1D53B8)
+                                            : (open-touch.has-hover
+                                                ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
+                                                : (root.dark-mode ? #3370E3 : #2563EB));
+
+                                        Text {
+                                            text: "打开文件";
+                                            font-size: 14px;
+                                            font-weight: 600;
+                                            color: #FFFFFF;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
-            Text {
-                text: "•";
-                font-size: 12px;
-                color: root.dark-mode ? #4E5563 : #BCC4D1;
-            }
+            // 底部极简提示条（最近查看空态 + 渲染器/主题摘要）
+            HorizontalLayout {
+                alignment: center;
+                spacing: 16px;
 
-            Text {
-                text: "渲染：" + root.renderer-label + (root.reduced-motion ? "（减弱动态效果）" : "");
-                font-size: 12px;
-                color: root.dark-mode ? #7B8394 : #7A8496;
+                Text {
+                    text: "最近查看：暂无记录";
+                    font-size: 12px;
+                    color: root.dark-mode ? #7B8394 : #7A8496;
+                }
+
+                Text {
+                    text: "•";
+                    font-size: 12px;
+                    color: root.dark-mode ? #4E5563 : #BCC4D1;
+                }
+
+                Text {
+                    text: "渲染：" + root.renderer-label + (root.reduced-motion ? "（减弱动态效果）" : "");
+                    font-size: 12px;
+                    color: root.dark-mode ? #7B8394 : #7A8496;
+                }
             }
         }
     }

@@ -7,6 +7,7 @@ pub mod motion;
 pub mod platform;
 pub mod ports;
 pub mod session;
+pub mod window_shell;
 
 slint::include_modules!();
 

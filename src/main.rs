@@ -164,8 +164,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // 4. 显式显示窗口，并在冷启动基准模式下捕获首帧渲染完成时机
+    // 4. 显式显示窗口，并在 Windows 上挂载无边框自定义标题栏壳层（HTMAXBUTTON / Aero Snap / DWM 圆角阴影）
     window.show()?;
+
+    #[cfg(target_os = "windows")]
+    install_windows_window_shell(&window, &session);
 
     let _bench_fallback_timer = if opts.benchmark_first_frame {
         let recorded = Arc::new(AtomicBool::new(false));
@@ -248,4 +251,65 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
         window.set_app_title("AnyFile".into());
         window.set_status_subtitle("拖放任意文件到此处，或点击下方按钮打开".into());
     }
+}
+
+#[cfg(target_os = "windows")]
+fn install_windows_window_shell(window: &MainWindow, session: &AppSession) {
+    use anyfile::window_shell::win32::{ShellCallbacks, WindowsShellHandle};
+    use anyfile::window_shell::{TitleBarMetrics, WindowSizingConstraints};
+
+    // winit 0.30 在事件循环启动（resumed）后才真正创建原生 Win32 HWND，
+    // 因此通过 invoke_from_event_loop 在首帧事件派发时挂载子类化与工作区自适应尺寸。
+    let win_weak = window.as_weak();
+    let dark_mode = session.resolved_theme().is_dark();
+
+    let _ = slint::invoke_from_event_loop(move || {
+        let Some(win) = win_weak.upgrade() else {
+            return;
+        };
+
+        let win_weak_max = win.as_weak();
+        let win_weak_hover = win.as_weak();
+        let callbacks = ShellCallbacks {
+            on_maximized_changed: Box::new(move |maximized| {
+                let win_weak = win_weak_max.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(win) = win_weak.upgrade() {
+                        win.set_is_maximized(maximized);
+                    }
+                });
+            }),
+            on_max_button_hover_changed: Box::new(move |hovered| {
+                let win_weak = win_weak_hover.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(win) = win_weak.upgrade() {
+                        win.set_max_button_hovered(hovered);
+                    }
+                });
+            }),
+        };
+
+        let Ok(shell_handle) = WindowsShellHandle::install(
+            win.window(),
+            TitleBarMetrics::default(),
+            WindowSizingConstraints::default(),
+            dark_mode,
+            callbacks,
+        ) else {
+            return;
+        };
+
+        win.set_is_maximized(shell_handle.is_maximized());
+        shell_handle.apply_adaptive_size(None);
+
+        win.on_minimize_clicked(move || {
+            shell_handle.minimize();
+        });
+        win.on_maximize_clicked(move || {
+            shell_handle.toggle_maximize();
+        });
+        win.on_close_clicked(move || {
+            shell_handle.close();
+        });
+    });
 }
