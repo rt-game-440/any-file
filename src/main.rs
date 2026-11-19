@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use anyfile::config::{ConfigStore, StorageMode, current_data_location};
 use anyfile::diagnostics;
 use anyfile::domain::ThemePreference;
-use anyfile::i18n::{LanguagePreference, UiStrings};
+use anyfile::i18n::{LanguagePreference, UiStrings, large_file_notice, localize, text_meta_line};
 use anyfile::ports::SystemShell;
 use anyfile::ui_text::apply_ui_strings;
 use anyfile::update_check::{CurlReleaseSource, UpdateStatus, check_for_update};
@@ -434,7 +434,7 @@ fn sync_audio_to_window(window: &MainWindow, session: &AppSession) {
     window.set_audio_title(meta.title.clone().into());
     window.set_audio_artist(meta.artist.clone().unwrap_or_default().into());
     window.set_audio_album(meta.album.clone().unwrap_or_default().into());
-    let mut fmt = session.detected_format();
+    let mut fmt = localize(&session.detected_format(), session.language());
     if let Some(rate) = meta.sample_rate {
         fmt.push_str(&format!(" · {:.1} kHz", rate as f32 / 1000.0));
     }
@@ -464,7 +464,7 @@ fn sync_audio_to_window(window: &MainWindow, session: &AppSession) {
     window.set_audio_volume(snap.volume);
     window.set_audio_muted(snap.muted);
     window.set_audio_auto_next(state.auto_next);
-    window.set_audio_error(state.error.unwrap_or_default().into());
+    window.set_audio_error(localize(&state.error.unwrap_or_default(), session.language()).into());
 }
 
 fn sync_motion_to_window(window: &MainWindow, snapshot: MotionSnapshot) {
@@ -477,7 +477,7 @@ fn sync_motion_to_window(window: &MainWindow, snapshot: MotionSnapshot) {
 fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_label: &str) {
     window.set_dark_mode(session.resolved_theme().is_dark());
     window.set_reduced_motion(session.motion_profile().reduced_motion);
-    window.set_renderer_label(renderer_label.into());
+    window.set_renderer_label(localize(renderer_label, session.language()).into());
 
     let viewer = session.active_viewer();
     let viewer_key = match viewer {
@@ -489,7 +489,7 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
         ViewerKind::Unsupported => "unsupported",
     };
     window.set_active_viewer(viewer_key.into());
-    window.set_detected_format(session.detected_format().into());
+    window.set_detected_format(localize(&session.detected_format(), session.language()).into());
 
     let seq = session.sibling_sequence();
     window.set_filter_by_category(seq.filter_by_category);
@@ -555,7 +555,7 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
 
     if let Some(fallback) = session.fallback_info() {
         window.set_fallback_size_text(fallback.formatted_size().into());
-        window.set_fallback_reason(fallback.reason_message.into());
+        window.set_fallback_reason(localize(&fallback.reason_message, session.language()).into());
     } else {
         window.set_fallback_size_text("".into());
         window.set_fallback_reason("".into());
@@ -594,26 +594,24 @@ fn sync_text_view(window: &MainWindow, session: &AppSession) {
         return;
     };
     let find = session.text_find_state();
-    window.set_text_find_status(find.status_text().into());
+    let lang = session.language();
+    window.set_text_find_status(localize(&find.status_text(), lang).into());
     window.set_text_gutter_digits(doc.lines.len().max(1).to_string().len() as i32);
     window.set_text_rows(ModelRc::new(TextLinesModel::new(doc.clone(), &find)));
     let m = &doc.meta;
     window.set_text_meta(
-        format!(
-            "{} · {} · {} 行 · {} · 字号 {:.0}px",
+        text_meta_line(
+            lang,
             m.encoding.label(),
             m.line_ending.label(),
             doc.lines.len(),
             m.syntax.label(),
-            session.text_font_size()
+            session.text_font_size(),
         )
         .into(),
     );
     let notice = if m.is_large_file_readonly {
-        format!(
-            "大文件只读保护（{:.1} MB）：仅预览前 2 MB，已禁用编辑",
-            m.file_size as f64 / 1_048_576.0
-        )
+        large_file_notice(lang, m.file_size as f64 / 1_048_576.0)
     } else {
         String::new()
     };
@@ -816,7 +814,7 @@ fn wire_settings_and_ops(
                 let tr = UiStrings::for_language(session.language());
                 match result {
                     Ok(_) => show_toast(&w, tr.toast_deleted),
-                    Err(e) => show_toast(&w, format!("{}{e}", tr.toast_failed_prefix)),
+                    Err(e) => show_toast(&w, format!("{}{}", tr.toast_failed_prefix, localize(&e, session.language()))),
                 }
             }
         });
@@ -830,7 +828,7 @@ fn wire_settings_and_ops(
                 let tr = UiStrings::for_language(session.language());
                 match result {
                     Ok(()) => show_toast(&w, tr.toast_copied),
-                    Err(e) => show_toast(&w, format!("{}{e}", tr.toast_failed_prefix)),
+                    Err(e) => show_toast(&w, format!("{}{}", tr.toast_failed_prefix, localize(&e, session.language()))),
                 }
             }
         });
@@ -843,7 +841,7 @@ fn wire_settings_and_ops(
                 && let Some(w) = weak.upgrade()
             {
                 let tr = UiStrings::for_language(session.language());
-                show_toast(&w, format!("{}{e}", tr.toast_failed_prefix));
+                show_toast(&w, format!("{}{}", tr.toast_failed_prefix, localize(&e, session.language())));
             }
         });
     }
@@ -938,7 +936,7 @@ fn wire_settings_and_ops(
                             RELEASE_URL.with(|u| *u.borrow_mut() = url);
                         }
                         UpdateStatus::Failed(e) => w
-                            .set_update_text(format!("{}{e}", tr.update_failed_prefix).into()),
+                            .set_update_text(format!("{}{}", tr.update_failed_prefix, localize(&e, lang)).into()),
                     }
                 });
             });

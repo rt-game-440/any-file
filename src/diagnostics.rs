@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 const KEEP_LOGS: usize = 20;
 
-/// 将 Unix 秒转为 `yyyy-MM-dd HH-mm-ss`（UTC，避免引入时间库）
+/// 将 Unix 秒转为 `yyyy-MM-dd HH-mm-ss`（传入已换算为本地时间的秒数，避免引入时间库）
 pub fn format_timestamp(secs: u64) -> String {
     let days = (secs / 86400) as i64;
     let rem = secs % 86400;
@@ -89,10 +89,37 @@ pub fn init(data_dir: &Path) -> Option<&'static Logger> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    if let Ok(l) = Logger::create(data_dir, now) {
+    if let Ok(l) = Logger::create(data_dir, to_local_secs(now, local_utc_offset_secs())) {
         let _ = GLOBAL.set(l);
     }
     GLOBAL.get()
+}
+
+/// UTC 秒 + 本地时区偏移（秒）-> 本地“墙钟”秒
+pub fn to_local_secs(utc_secs: u64, offset_secs: i64) -> u64 {
+    (utc_secs as i64 + offset_secs).max(0) as u64
+}
+
+/// 本地相对 UTC 的偏移（秒，含夏令时）；非 Windows 或失败时为 0
+pub fn local_utc_offset_secs() -> i64 {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
+        // SAFETY: 仅向有效的本地结构体写入
+        unsafe {
+            let mut tz: TIME_ZONE_INFORMATION = std::mem::zeroed();
+            let id = GetTimeZoneInformation(&mut tz);
+            if id == 0xFFFF_FFFF {
+                return 0;
+            }
+            let bias = tz.Bias + if id == 2 { tz.DaylightBias } else { tz.StandardBias };
+            -(bias as i64) * 60
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        0
+    }
 }
 
 pub fn info(msg: &str) {
@@ -110,6 +137,21 @@ pub fn error(msg: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_time_shifts_by_offset() {
+        // UTC 2024-01-01 00:00:00 在 UTC+8 为 08:00:00
+        let utc = 1_704_067_200;
+        assert_eq!(
+            format_timestamp(to_local_secs(utc, 8 * 3600)),
+            "2024-01-01 08-00-00"
+        );
+        assert_eq!(
+            format_timestamp(to_local_secs(utc, -5 * 3600)),
+            "2023-12-31 19-00-00"
+        );
+        assert!(local_utc_offset_secs().abs() <= 14 * 3600);
+    }
 
     #[test]
     fn timestamp_format() {

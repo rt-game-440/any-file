@@ -149,6 +149,157 @@ ui_strings! {
     update_failed_prefix: "检查失败：", "Check failed: ";
 }
 
+/// 中文固定短语 -> 英文；长短语在前（按顺序匹配替换）。
+const PHRASES: &[(&str, &str)] = &[
+    ("文件扩展名为 .", "File extension is ."),
+    ("，但文件头特征缺失或已损坏", ", but the file header signature is missing or damaged"),
+    ("，但文件头无效或内容已损坏，无法安全解码。", ", but the header is invalid or the content is damaged and cannot be decoded safely."),
+    ("目标路径是目录而非文件", "The target path is a directory, not a file"),
+    ("目标路径是一个文件夹，无法作为单个文件预览。", "The target path is a folder and cannot be previewed as a single file."),
+    ("检测到纯二进制或未知格式文件，为避免乱码已展示安全信息卡。", "Binary or unknown format detected; showing a safe info card to avoid garbled text."),
+    ("无法读取文件元数据", "Cannot read file metadata"),
+    ("无法打开文件（可能缺少权限或被占用）", "Cannot open file (permission missing or file in use)"),
+    ("读取文件内容失败", "Failed to read file content"),
+    ("文件头缺少合法的 IHDR 块", "header is missing a valid IHDR chunk"),
+    ("文件头损坏或数据不完整，无法解码。", "header is damaged or data is incomplete; cannot decode."),
+    ("文件头损坏或数据被截断，无法解码。", "header is damaged or data is truncated; cannot decode."),
+    ("文件头损坏或被截断，无法解码。", "header is damaged or truncated; cannot decode."),
+    ("音频头损坏或不完整，无法播放。", "audio header is damaged or incomplete; cannot play."),
+    ("标记段无效或被截断", "marker segment is invalid or truncated"),
+    ("逻辑屏幕描述符不完整", "logical screen descriptor is incomplete"),
+    ("头损坏或长度不足", "header is damaged or too short"),
+    ("容器数据不完整", "container data is incomplete"),
+    ("缺少 fmt 块", "is missing the fmt chunk"),
+    ("文件头不完整", "header is incomplete"),
+    ("（纯音频）", " (audio only)"),
+    ("损坏的 ", "Corrupted "),
+    ("纯二进制", "Binary"),
+    ("不可读", "Unreadable"),
+    ("目录", "Directory"),
+    ("纯文本", "Plain text"),
+    ("日志", "Log"),
+    ("混合换行", "Mixed line endings"),
+    ("无换行", "No line ending"),
+    ("无结果", "No results"),
+    ("文本", "text"),
+    ("无法读取文件信息", "Cannot read file info"),
+    ("无法打开文件", "Cannot open file"),
+    ("读取文件失败", "Failed to read file"),
+    ("文件不存在", "File does not exist"),
+    ("当前未打开任何文件项", "No file is currently open"),
+    ("无法手动切换到欢迎空态", "Cannot switch to the welcome screen manually"),
+    ("系统回收站操作尚未实现", "Recycle Bin is not supported on this platform"),
+    ("在资源管理器中显示尚未实现", "Show in Explorer is not supported on this platform"),
+    ("打开方式对话框尚未实现", "The Open With dialog is not supported on this platform"),
+    ("默认应用设置跳转尚未实现", "Opening default apps settings is not supported on this platform"),
+    ("剪贴板操作尚未实现", "Clipboard is not supported on this platform"),
+    ("打开链接尚未实现", "Opening links is not supported on this platform"),
+    ("打开失败（错误码 ", "Open failed (error code "),
+    ("移入回收站失败（错误码 ", "Move to Recycle Bin failed (error code "),
+    ("打开资源管理器失败", "Failed to open Explorer"),
+    ("不允许打开该链接", "Opening this link is not allowed"),
+    ("无法打开剪贴板", "Cannot open the clipboard"),
+    ("剪贴板内存分配失败", "Clipboard memory allocation failed"),
+    ("剪贴板内存锁定失败", "Clipboard memory lock failed"),
+    ("写入剪贴板失败", "Failed to write to the clipboard"),
+    ("调起系统“打开方式”对话框失败", "Failed to show the system Open With dialog"),
+    ("无法调用 curl", "Cannot run curl"),
+    ("响应解析失败", "Failed to parse response"),
+    ("响应缺少 tag_name", "Response is missing tag_name"),
+    ("获取配置文件锁超时", "Timed out acquiring the config file lock"),
+    ("无法打开音频文件", "Cannot open audio file"),
+    ("无法识别音频格式", "Cannot recognize audio format"),
+    ("文件中没有可解码的音频轨道", "No decodable audio track in the file"),
+    ("不支持的音频编码", "Unsupported audio codec"),
+    ("音频缺少采样率信息", "Audio is missing sample rate information"),
+    ("读取音频数据失败", "Failed to read audio data"),
+    ("解码失败", "Decoding failed"),
+    ("跳转失败", "Seek failed"),
+    ("未命名音频", "Untitled audio"),
+    ("未找到可用的音频输出设备", "No audio output device found"),
+    ("无法获取输出配置", "Cannot get output configuration"),
+    ("不支持的输出采样格式", "Unsupported output sample format"),
+    ("无法创建音频输出流", "Cannot create audio output stream"),
+    ("初始化目录监听器失败", "Failed to initialize directory watcher"),
+    ("监听目录失败", "Failed to watch directory"),
+    ("拒绝从相对路径加载 mpv-2.dll", "Refused to load mpv-2.dll from a relative path"),
+    ("未在可信目录找到 mpv-2.dll", "mpv-2.dll not found in a trusted directory"),
+    ("缺少导出符号", "is missing export symbol"),
+    ("libmpv ABI 版本不兼容：实际", "libmpv ABI version incompatible: found"),
+    ("要求主版本 >=", "required major >="),
+    ("拒绝不安全的媒体路径", "Refused unsafe media path"),
+    ("不支持的视频操作", "Unsupported video operation"),
+    ("无法解析当前可执行文件路径", "Cannot resolve the current executable path"),
+    ("当前仅在 Windows 平台实现 mpv-2.dll 安全加载", "Secure mpv-2.dll loading is only implemented on Windows"),
+    ("等待 mpv 加载媒体文件超时", "Timed out waiting for mpv to load the media file"),
+    ("路径包含无效 UTF-8 字符", "Path contains invalid UTF-8"),
+    ("媒体路径为空", "Media path is empty"),
+    ("媒体路径包含非法 NUL 字节", "Media path contains an illegal NUL byte"),
+    ("禁止非本地协议", "Non-local protocol is forbidden"),
+    ("禁止 mpv 特殊伪协议前缀", "mpv special pseudo-protocol prefix is forbidden"),
+    ("获取原生窗口句柄失败", "Failed to get native window handle"),
+    ("应用强制沙箱参数", "Failed to apply sandbox option"),
+    ("失败", "failed"),
+    ("行", "lines"),
+    ("字号", "font size"),
+    ("大文件只读保护", "Large file read-only protection"),
+    ("仅预览前 2 MB，已禁用编辑", "previewing only the first 2 MB; editing disabled"),
+    ("（回退）", " (fallback)"),
+    ("：", ": "),
+    ("（", " ("),
+    ("）", ")"),
+    ("，", ", "),
+    ("。", "."),
+];
+
+/// 将 Rust 侧产生的中文用户可见消息翻译为目标语言；中文原样返回。
+pub fn localize(msg: &str, lang: Language) -> String {
+    if lang == Language::ZhCn {
+        return msg.to_string();
+    }
+    let mut out = msg.to_string();
+    for (zh, en) in PHRASES {
+        if out.contains(zh) {
+            out = out.replace(zh, en);
+        }
+    }
+    strip_os_localized_text(out)
+}
+
+/// 操作系统错误文案按系统语言本地化，英文界面下去掉其中的中文，仅保留 `(os error N)`。
+fn strip_os_localized_text(s: String) -> String {
+    let is_cjk =
+        |c: char| ('\u{3000}'..='\u{9fff}').contains(&c) || ('\u{ff00}'..='\u{ffef}').contains(&c);
+    let Some(first) = s.find(is_cjk) else {
+        return s;
+    };
+    let start = s[..first].rfind(": ").map_or(first, |i| i + 2);
+    match s.find("(os error") {
+        Some(end) if end >= start => format!("{}{}", &s[..start], &s[end..]),
+        _ => s[..start].trim_end_matches([' ', ':']).to_string(),
+    }
+}
+
+/// 文本视图元信息行：编码 · 换行 · N 行 · 语法 · 字号
+pub fn text_meta_line(lang: Language, enc: &str, eol: &str, lines: usize, syntax: &str, px: f32) -> String {
+    match lang {
+        Language::ZhCn => format!("{enc} · {eol} · {lines} 行 · {syntax} · 字号 {px:.0}px"),
+        Language::En => format!(
+            "{enc} · {} · {lines} lines · {} · font {px:.0}px",
+            localize(eol, lang),
+            localize(syntax, lang)
+        ),
+    }
+}
+
+/// 大文件只读提示
+pub fn large_file_notice(lang: Language, mb: f64) -> String {
+    match lang {
+        Language::ZhCn => format!("大文件只读保护（{mb:.1} MB）：仅预览前 2 MB，已禁用编辑"),
+        Language::En => format!("Large file read-only protection ({mb:.1} MB): previewing only the first 2 MB; editing disabled"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
