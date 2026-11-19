@@ -220,3 +220,48 @@ pub enum CloseDecision {
     /// 存在未保存修改，需要提示用户确认
     ConfirmUnsavedChanges,
 }
+
+/// 兜底信息卡的触发原因（纯二进制、损坏文件、不可读或暂不支持格式）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FallbackReason {
+    /// 纯二进制或未知内容格式
+    PureBinary,
+    /// 文件头或结构损坏
+    CorruptedFile(String),
+    /// 文件无法读取或权限受限
+    Unreadable(String),
+    /// 暂不支持的格式
+    UnsupportedFormat(String),
+}
+
+/// 纯二进制或损坏文件的友好兜底信息卡数据
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FallbackInfo {
+    /// 目标文件路径
+    pub path: PathBuf,
+    /// 文件字节大小
+    pub file_size: u64,
+    /// 兜底原因分类
+    pub reason: FallbackReason,
+    /// 面向用户的简体中文原因说明
+    pub reason_message: String,
+}
+
+impl FallbackInfo {
+    /// 将字节数格式化为易读的文件大小字符串
+    pub fn formatted_size(&self) -> String {
+        const KB: f64 = 1024.0;
+        const MB: f64 = KB * 1024.0;
+        const GB: f64 = MB * 1024.0;
+        let bytes = self.file_size as f64;
+        if bytes >= GB {
+            format!("{:.2} GB", bytes / GB)
+        } else if bytes >= MB {
+            format!("{:.2} MB", bytes / MB)
+        } else if bytes >= KB {
+            format!("{:.1} KB", bytes / KB)
+        } else {
+            format!("{} B", self.file_size)
+        }
+    }
+}

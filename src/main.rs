@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use anyfile::domain::{CloseDecision, MotionProfile};
+use anyfile::domain::{CloseDecision, MotionProfile, ViewerKind};
 use anyfile::motion::{MotionChannel, MotionSnapshot};
 use anyfile::platform::{PlatformSystemShell, SystemClock, UnavailableVideoBackend};
 use anyfile::session::AppSession;
@@ -68,7 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. 创建并绑定 Slint 主窗口
     let window = MainWindow::new()?;
-    sync_session_to_window(&window, &session, active_renderer.display_label());
+    let renderer_label = active_renderer.display_label();
+    sync_session_to_window(&window, &session, renderer_label);
     sync_motion_to_window(&window, session.motion_snapshot());
 
     // 3.1 按需物理弹簧动画帧驱动（仅在存在活跃动画时以 120Hz 节拍推进，收敛后自动停表零空转）
@@ -121,6 +122,74 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 MotionProfile::bouncy(),
             );
             start_loop();
+        });
+    }
+
+    // 绑定同目录导航、筛选切换、查看器切换、兜底卡“用其他应用打开”与拖放回调
+    {
+        let session = Arc::clone(&session);
+        let window_weak = window.as_weak();
+        let start_loop = Rc::clone(&start_motion_loop);
+        window.on_prev_sibling_clicked(move || {
+            if session.navigate_prev().is_ok_and(|opt| opt.is_some()) {
+                if let Some(win) = window_weak.upgrade() {
+                    sync_session_to_window(&win, &session, renderer_label);
+                }
+                start_loop();
+            }
+        });
+    }
+    {
+        let session = Arc::clone(&session);
+        let window_weak = window.as_weak();
+        let start_loop = Rc::clone(&start_motion_loop);
+        window.on_next_sibling_clicked(move || {
+            if session.navigate_next().is_ok_and(|opt| opt.is_some()) {
+                if let Some(win) = window_weak.upgrade() {
+                    sync_session_to_window(&win, &session, renderer_label);
+                }
+                start_loop();
+            }
+        });
+    }
+    {
+        let session = Arc::clone(&session);
+        let window_weak = window.as_weak();
+        window.on_toggle_filter_clicked(move || {
+            session.toggle_sibling_filter();
+            if let Some(win) = window_weak.upgrade() {
+                sync_session_to_window(&win, &session, renderer_label);
+            }
+        });
+    }
+    {
+        let session = Arc::clone(&session);
+        let window_weak = window.as_weak();
+        window.on_switch_viewer_clicked(move || {
+            let _ = session.cycle_viewer();
+            if let Some(win) = window_weak.upgrade() {
+                sync_session_to_window(&win, &session, renderer_label);
+            }
+        });
+    }
+    {
+        let session = Arc::clone(&session);
+        window.on_open_with_other_app_clicked(move || {
+            let _ = session.open_with_other_app();
+        });
+    }
+    {
+        let session = Arc::clone(&session);
+        let window_weak = window.as_weak();
+        let start_loop = Rc::clone(&start_motion_loop);
+        window.on_file_dropped(move |dropped_path| {
+            let path = PathBuf::from(dropped_path.as_str());
+            if session.drop_file(&path).is_ok() {
+                if let Some(win) = window_weak.upgrade() {
+                    sync_session_to_window(&win, &session, renderer_label);
+                }
+                start_loop();
+            }
         });
     }
 
@@ -238,17 +307,68 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
     window.set_reduced_motion(session.motion_profile().reduced_motion);
     window.set_renderer_label(renderer_label.into());
 
+    let viewer = session.active_viewer();
+    let viewer_key = match viewer {
+        ViewerKind::Welcome => "welcome",
+        ViewerKind::Image => "image",
+        ViewerKind::Video => "video",
+        ViewerKind::Audio => "audio",
+        ViewerKind::Text => "text",
+        ViewerKind::Unsupported => "unsupported",
+    };
+    window.set_active_viewer(viewer_key.into());
+    window.set_detected_format(session.detected_format().into());
+
+    let seq = session.sibling_sequence();
+    window.set_filter_by_category(seq.filter_by_category);
+    match seq.current_index {
+        Some(idx) if !seq.entries.is_empty() => {
+            window.set_can_go_prev(idx > 0);
+            window.set_can_go_next(idx + 1 < seq.entries.len());
+            window.set_sibling_position_text(format!("{} / {}", idx + 1, seq.entries.len()).into());
+        }
+        _ => {
+            window.set_can_go_prev(false);
+            window.set_can_go_next(false);
+            window.set_sibling_position_text("".into());
+        }
+    }
+
+    let viewers = session.available_viewers();
+    let show_switch = viewer != ViewerKind::Welcome
+        && viewer != ViewerKind::Unsupported
+        && (viewers.len() > 1 || viewer != ViewerKind::Text);
+    window.set_show_switch_viewer(show_switch);
+    let switch_label = if viewer == ViewerKind::Text && viewers.len() > 1 {
+        "切换查看器"
+    } else {
+        "以文本打开"
+    };
+    window.set_switch_viewer_label(switch_label.into());
+
+    if let Some(fallback) = session.fallback_info() {
+        window.set_fallback_size_text(fallback.formatted_size().into());
+        window.set_fallback_reason(fallback.reason_message.into());
+    } else {
+        window.set_fallback_size_text("".into());
+        window.set_fallback_reason("".into());
+    }
+
     if let Some(entry) = session.current_file_entry() {
-        let title = entry
+        let file_name = entry
             .path
             .file_name()
             .and_then(|s| s.to_str())
-            .map(|name| format!("{name} — AnyFile"))
-            .unwrap_or_else(|| "AnyFile".to_string());
-        window.set_app_title(title.into());
+            .unwrap_or("未命名文件")
+            .to_string();
+        window.set_app_title(format!("{file_name} — AnyFile").into());
+        window.set_current_file_name(file_name.into());
+        window.set_current_file_path(entry.path.display().to_string().into());
         window.set_status_subtitle(format!("已打开：{}", entry.path.display()).into());
     } else {
         window.set_app_title("AnyFile".into());
+        window.set_current_file_name("".into());
+        window.set_current_file_path("".into());
         window.set_status_subtitle("拖放任意文件到此处，或点击下方按钮打开".into());
     }
 }

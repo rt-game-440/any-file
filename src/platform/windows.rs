@@ -1,6 +1,8 @@
 //! Windows 10/11 系统壳层真实实现：读取系统深浅色主题与“减弱动态效果”设置。
 
 use std::ffi::c_void;
+use std::path::Path;
+use std::process::Command;
 
 use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_READ, REG_DWORD, RegCloseKey, RegOpenKeyExW, RegQueryValueExW,
@@ -106,5 +108,14 @@ impl SystemShell for WindowsSystemShell {
             Some(false) => true,
             Some(true) | None => false,
         }
+    }
+
+    fn open_with_dialog(&self, path: &Path) -> Result<(), String> {
+        let arg = format!("shell32.dll,OpenAs_RunDLL {}", path.display());
+        Command::new("rundll32.exe")
+            .arg(arg)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("调起系统“打开方式”对话框失败：{e}"))
     }
 }
