@@ -1,6 +1,7 @@
 //! AnyFile 核心库 crate 入口。
 //! 导出无头应用控制器 `AppSession`、领域模型、外部边界 Ports、平台实现与 Slint UI 模块。
 
+pub mod audio_viewer;
 pub mod domain;
 pub mod fixtures;
 pub mod motion;

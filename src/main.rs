@@ -5,12 +5,14 @@
     windows_subsystem = "windows"
 )]
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use anyfile::audio_viewer::{AudioCommand, AudioKey, AudioPlayer, AudioViewer, KeyModifiers};
 use anyfile::domain::{CloseDecision, MotionProfile, ViewerKind};
 use anyfile::motion::{MotionChannel, MotionSnapshot};
 use anyfile::platform::{PlatformSystemShell, SystemClock, UnavailableVideoBackend};
@@ -194,6 +196,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // 音频视图回调（命令 -> AudioViewer；切歌后同步整个窗口状态）
+    {
+        let session = Arc::clone(&session);
+        let window_weak = window.as_weak();
+        window.on_audio_key(move |text, ctrl| {
+            let Some(key) = audio_key_from_text(text.as_str()) else {
+                return false;
+            };
+            let handled = with_audio(|a| a.handle_key(key, KeyModifiers { ctrl }, &session));
+            if let Some(win) = window_weak.upgrade() {
+                sync_session_to_window(&win, &session, renderer_label);
+            }
+            handled
+        });
+    }
+    macro_rules! audio_cb {
+        ($setter:ident, |$($arg:ident),*| $cmd:expr) => {{
+            let session = Arc::clone(&session);
+            let window_weak = window.as_weak();
+            window.$setter(move |$($arg),*| {
+                let cmd: AudioCommand = $cmd;
+                with_audio(|a| a.handle_command(cmd, &session));
+                if let Some(win) = window_weak.upgrade() {
+                    sync_session_to_window(&win, &session, renderer_label);
+                }
+            });
+        }};
+    }
+    audio_cb!(on_audio_toggle_play, | | AudioCommand::TogglePlay);
+    audio_cb!(on_audio_seek_to, |v| AudioCommand::SeekTo(v as f64));
+    audio_cb!(on_audio_cycle_speed, | | AudioCommand::CycleSpeed);
+    audio_cb!(on_audio_set_volume, |v| AudioCommand::SetVolume(v));
+    audio_cb!(on_audio_toggle_mute, | | AudioCommand::ToggleMute);
+    audio_cb!(on_audio_prev_track, | | AudioCommand::PrevTrack);
+    audio_cb!(on_audio_next_track, | | AudioCommand::NextTrack);
+    audio_cb!(on_audio_toggle_auto_next, | | AudioCommand::ToggleAutoNext);
+
+    // 音频播放进度/播完轮询：仅在音频视图激活期间以 100ms 运行
+    let audio_timer = slint::Timer::default();
+    {
+        let session = Arc::clone(&session);
+        let window_weak = window.as_weak();
+        audio_timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
+            if session.active_viewer() != ViewerKind::Audio {
+                return;
+            }
+            let advanced = with_audio(|a| a.poll(&session));
+            if let Some(win) = window_weak.upgrade() {
+                if advanced {
+                    sync_session_to_window(&win, &session, renderer_label);
+                } else {
+                    sync_audio_to_window(&win, &session);
+                }
+            }
+        });
+    }
+
     // 启动初期若有活跃入场动画，按需拉起帧驱动
     start_motion_loop();
 
@@ -229,7 +288,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session_for_close = Arc::clone(&session);
     window.window().on_close_requested(move || {
         match session_for_close.request_close() {
-            CloseDecision::AllowExit => CloseRequestResponse::HideWindow,
+            CloseDecision::AllowExit => {
+                with_audio(|a| a.stop());
+                CloseRequestResponse::HideWindow
+            }
             CloseDecision::ConfirmUnsavedChanges => CloseRequestResponse::KeepWindowShown,
         }
     });
@@ -294,6 +356,96 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     slint::run_event_loop()?;
     Ok(())
+}
+
+thread_local! {
+    /// 音频视图控制器（仅 UI 线程；首次进入音频视图时才打开输出设备，避免拖慢冷启动）
+    static AUDIO: RefCell<Option<AudioViewer>> = const { RefCell::new(None) };
+}
+
+fn with_audio<R>(f: impl FnOnce(&mut AudioViewer) -> R) -> R {
+    AUDIO.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let viewer = slot.get_or_insert_with(|| AudioViewer::new(AudioPlayer::with_default_device()));
+        f(viewer)
+    })
+}
+
+fn audio_key_from_text(text: &str) -> Option<AudioKey> {
+    use slint::platform::Key;
+    let mut chars = text.chars();
+    let c = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+    if c == ' ' {
+        Some(AudioKey::Space)
+    } else if c == char::from(Key::LeftArrow) {
+        Some(AudioKey::Left)
+    } else if c == char::from(Key::RightArrow) {
+        Some(AudioKey::Right)
+    } else if c == char::from(Key::PageUp) {
+        Some(AudioKey::PageUp)
+    } else if c == char::from(Key::PageDown) {
+        Some(AudioKey::PageDown)
+    } else if c.eq_ignore_ascii_case(&'m') {
+        Some(AudioKey::M)
+    } else {
+        None
+    }
+}
+
+/// 同步音频控制器与会话（切走即停播），并刷新音频视图属性
+fn sync_audio_to_window(window: &MainWindow, session: &AppSession) {
+    let is_audio = session.active_viewer() == ViewerKind::Audio;
+    if !is_audio {
+        // 未进入过音频视图则无需创建输出设备
+        AUDIO.with(|cell| {
+            if let Some(a) = cell.borrow_mut().as_mut() {
+                a.sync_with_session(session);
+            }
+        });
+        return;
+    }
+    let state = with_audio(|a| {
+        a.sync_with_session(session);
+        a.view_state()
+    });
+    let meta = &state.metadata;
+    window.set_audio_title(meta.title.clone().into());
+    window.set_audio_artist(meta.artist.clone().unwrap_or_default().into());
+    window.set_audio_album(meta.album.clone().unwrap_or_default().into());
+    let mut fmt = session.detected_format();
+    if let Some(rate) = meta.sample_rate {
+        fmt.push_str(&format!(" · {:.1} kHz", rate as f32 / 1000.0));
+    }
+    if let Some(kbps) = meta.bitrate_kbps {
+        fmt.push_str(&format!(" · {kbps} kbps"));
+    }
+    window.set_audio_format(fmt.into());
+    match &meta.cover {
+        Some(cover) => {
+            let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+                &cover.rgba,
+                cover.width,
+                cover.height,
+            );
+            window.set_audio_cover(slint::Image::from_rgba8(buf));
+            window.set_audio_has_cover(true);
+        }
+        None => window.set_audio_has_cover(false),
+    }
+    let snap = state.snapshot;
+    window.set_audio_position_secs(snap.position_secs as f32);
+    window.set_audio_duration_secs(snap.duration_secs as f32);
+    window.set_audio_position_text(state.position_text.into());
+    window.set_audio_duration_text(state.duration_text.into());
+    window.set_audio_playing(snap.playing);
+    window.set_audio_speed_text(state.speed_text.into());
+    window.set_audio_volume(snap.volume);
+    window.set_audio_muted(snap.muted);
+    window.set_audio_auto_next(state.auto_next);
+    window.set_audio_error(state.error.unwrap_or_default().into());
 }
 
 fn sync_motion_to_window(window: &MainWindow, snapshot: MotionSnapshot) {
@@ -374,6 +526,7 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
         window.set_current_file_path("".into());
         window.set_status_subtitle("拖放任意文件到此处，或点击下方按钮打开".into());
     }
+    sync_audio_to_window(window, session);
 }
 
 /// 同步文本查看态（行模型、字号、状态栏、查找状态）到窗口。
