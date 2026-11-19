@@ -12,11 +12,13 @@
 pub mod controls;
 pub mod core;
 pub mod decoder;
+pub mod fallback;
 pub mod metadata;
 pub mod player;
 pub mod viewer;
 
 pub use controls::{AudioCommand, AudioKey, KeyModifiers, SPEED_STEPS, format_time, map_key};
+pub use fallback::{AudioFallback, is_fallback_candidate};
 pub use core::{PlaybackSnapshot, PlayerCore};
 pub use decoder::{AudioDecoder, StreamInfo};
 pub use metadata::{AudioMetadata, CoverImage, read_metadata};

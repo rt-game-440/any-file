@@ -71,3 +71,9 @@ status: accepted
 - `src/video/mpv_backend.rs`：`MpvInstance`（沙箱化 RAII 实例、属性读写、命令执行、事件等待）与 `LazyMpvVideoBackend`（实现 `crate::ports::VideoBackend`，提供 `probe()` 与 `render_first_frame_sw()`）。
 - `src/video/compositing.rs`：`CompositingStrategy`、`VideoFrameRgba`、`VideoPlaybackState`、`VideoCommand`。
 - 渲染生命周期约束：工单 #9 在 `RenderingState::RenderingTeardown` 时，必须严格按 `mpv_render_context_free` -> 删除 FBO -> 切回 `slint_glrc` -> `wglDeleteContext(mpv_glrc)` -> 删除共享纹理 -> `drop(MpvInstance)` 的顺序释放资源，避免 libmpv 或 WGL 悬空资源。
+
+## 工单 #9 落地状态与实测修正
+
+- **实际落地：软件渲染路径（方案 C）**。工单 #9 的视频视图 (`src/video_viewer/`) 以 `MPV_RENDER_API_TYPE_SW`（`rgb0`，alpha 强制置 255）渲染到 `Image::from_rgba8`，渲染分辨率限幅 1280x720（`src/video_glue.rs`），`hwdec=auto-copy-safe`（硬解后拷回内存，供软件渲染使用）。该路径经真实 libmpv 实测（`tests/video_viewer.rs`，覆盖 MP4/MKV/WebM/MOV/AVI/WMV/FLV 首帧非黑、seek/倍速/音量/静音、内嵌与外挂字幕开关、Opus 音频回退）。
+- **方案 A（Skia OpenGL + WGL 共享上下文）尚未接入应用**：仅有 `examples/mpv_compositing_spike.rs` 的 spike 实现。本工单未复现上文方案 A 的实测数据（102 帧、~1.26ms/frame 等）；这些数字应视为未经复现的参考值，后续接入 GL 路径时需重新测量。因此上文“最终决策”中的方案 A 仍是目标方案，但当前发布路径为方案 C。
+- **后续**：在 `RenderingNotifier` 中接入方案 A 并以 `ActiveRenderer` 与上下文创建结果自动选择，失败则保留现有软件路径（UI 层 `VideoViewerPanel` 仅依赖 `image` 属性，无需改动）。

@@ -5,6 +5,7 @@ export { TextRow, TextSegment }
 import { TextEditorView, EditorState } from "text_editor.slint";
 export { EditorState }
 import { AudioViewerPanel } from "audio_viewer.slint";
+import { VideoViewerPanel } from "video_viewer.slint";
 import { Tr } from "i18n.slint";
 import { SettingsOverlay } from "settings_overlay.slint";
 import { ImageViewerPanel, ImageState } from "image_viewer.slint";
@@ -172,6 +173,36 @@ export component MainWindow inherits Window {
     callback audio-next-track();
     callback audio-toggle-auto-next();
 
+    // 视频视图
+    in property <image> video-frame;
+    in property <bool> video-has-frame: false;
+    in property <float> video-position-secs: 0;
+    in property <float> video-duration-secs: 0;
+    in property <string> video-position-text: "0:00";
+    in property <string> video-duration-text: "0:00";
+    in property <bool> video-playing: false;
+    in property <string> video-speed-text: "1x";
+    in property <float> video-volume: 1.0;
+    in property <bool> video-muted: false;
+    in property <bool> video-subtitles-visible: true;
+    in property <bool> video-has-subtitles: false;
+    in property <bool> video-fullscreen: false;
+    in property <bool> video-controls-visible: true;
+    in property <string> video-error: "";
+    callback video-key(string, bool) -> bool;
+    callback video-toggle-play();
+    callback video-seek-to(float);
+    callback video-cycle-speed();
+    callback video-set-volume(float);
+    callback video-toggle-mute();
+    callback video-prev-file();
+    callback video-next-file();
+    callback video-toggle-subtitles();
+    callback video-toggle-fullscreen();
+    callback video-activity();
+    callback video-hover-controls(bool);
+    callback video-area-resized(length, length);
+
     no-frame: true;
     title: root.app-title;
     preferred-width: 780px;
@@ -216,11 +247,16 @@ export component MainWindow inherits Window {
                     return accept;
                 }
             }
+            if (root.active-viewer == "video") {
+                if (root.video-key(event.text, event.modifiers.control)) {
+                    return accept;
+                }
+            }
             if (event.text == Key.Delete && root.active-viewer != "welcome" && !root.settings-open && !EditorState.active) {
                 root.delete-clicked();
                 return accept;
             }
-            if (root.active-viewer != "welcome" && root.active-viewer != "audio" && !EditorState.active) {
+            if (root.active-viewer != "welcome" && root.active-viewer != "audio" && root.active-viewer != "video" && !EditorState.active) {
                 if (event.text == Key.LeftArrow && root.can-go-prev) {
                     root.prev-sibling-clicked();
                     return accept;
@@ -692,6 +728,40 @@ export component MainWindow inherits Window {
                         }
                     }
 
+                    // 视频视图（全屏时由窗口级覆盖层承载）
+                    if root.active-viewer == "video" && !root.video-fullscreen : VideoViewerPanel {
+                        vertical-stretch: 1;
+                        frame: root.video-frame;
+                        has-frame: root.video-has-frame;
+                        position-secs: root.video-position-secs;
+                        duration-secs: root.video-duration-secs;
+                        position-text: root.video-position-text;
+                        duration-text: root.video-duration-text;
+                        playing: root.video-playing;
+                        speed-text: root.video-speed-text;
+                        volume: root.video-volume;
+                        muted: root.video-muted;
+                        subtitles-visible: root.video-subtitles-visible;
+                        has-subtitles: root.video-has-subtitles;
+                        fullscreen: false;
+                        controls-visible: root.video-controls-visible;
+                        error-text: root.video-error;
+                        can-prev: root.can-go-prev;
+                        can-next: root.can-go-next;
+                        toggle-play => { root.video-toggle-play(); }
+                        seek-to(v) => { root.video-seek-to(v); }
+                        cycle-speed => { root.video-cycle-speed(); }
+                        set-volume(v) => { root.video-set-volume(v); }
+                        toggle-mute => { root.video-toggle-mute(); }
+                        prev-file => { root.video-prev-file(); }
+                        next-file => { root.video-next-file(); }
+                        toggle-subtitles => { root.video-toggle-subtitles(); }
+                        toggle-fullscreen => { root.video-toggle-fullscreen(); }
+                        activity => { root.video-activity(); }
+                        hover-controls(h) => { root.video-hover-controls(h); }
+                        area-resized(w, h) => { root.video-area-resized(w, h); }
+                    }
+
                     // 3. 已探测媒体视图（图像 / 视频 / 音频 / 文本占位面板）
                     if root.active-viewer == "audio" : HorizontalLayout {
                         alignment: center;
@@ -728,7 +798,7 @@ export component MainWindow inherits Window {
                     }
 
                     // 3. 已探测媒体视图（图像 / 视频 / 文本占位面板）
-                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" && root.active-viewer != "audio" && root.active-viewer != "text" && root.active-viewer != "image" : HorizontalLayout {
+                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" && root.active-viewer != "audio" && root.active-viewer != "text" && root.active-viewer != "video" && root.active-viewer != "image" : HorizontalLayout {
                         alignment: center;
 
                         Rectangle {
@@ -806,6 +876,42 @@ export component MainWindow inherits Window {
                 }
             }
         }
+    }
+
+    if root.active-viewer == "video" && root.video-fullscreen : VideoViewerPanel {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        frame: root.video-frame;
+        has-frame: root.video-has-frame;
+        position-secs: root.video-position-secs;
+        duration-secs: root.video-duration-secs;
+        position-text: root.video-position-text;
+        duration-text: root.video-duration-text;
+        playing: root.video-playing;
+        speed-text: root.video-speed-text;
+        volume: root.video-volume;
+        muted: root.video-muted;
+        subtitles-visible: root.video-subtitles-visible;
+        has-subtitles: root.video-has-subtitles;
+        fullscreen: true;
+        controls-visible: root.video-controls-visible;
+        error-text: root.video-error;
+        can-prev: root.can-go-prev;
+        can-next: root.can-go-next;
+        toggle-play => { root.video-toggle-play(); }
+        seek-to(v) => { root.video-seek-to(v); }
+        cycle-speed => { root.video-cycle-speed(); }
+        set-volume(v) => { root.video-set-volume(v); }
+        toggle-mute => { root.video-toggle-mute(); }
+        prev-file => { root.video-prev-file(); }
+        next-file => { root.video-next-file(); }
+        toggle-subtitles => { root.video-toggle-subtitles(); }
+        toggle-fullscreen => { root.video-toggle-fullscreen(); }
+        activity => { root.video-activity(); }
+        hover-controls(h) => { root.video-hover-controls(h); }
+        area-resized(w, h) => { root.video-area-resized(w, h); }
     }
 
     if root.settings-open : SettingsOverlay {

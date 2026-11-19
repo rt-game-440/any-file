@@ -115,6 +115,20 @@ ui_strings! {
     audio_unmute: "取消静音", "Unmute";
     audio_mute: "静音", "Mute";
     audio_auto_next: "自动播放下一首", "Auto-play next";
+    video_play: "播放", "Play";
+    video_pause: "暂停", "Pause";
+    video_prev: "上一个", "Previous";
+    video_next: "下一个", "Next";
+    video_mute: "静音", "Mute";
+    video_unmute: "取消静音", "Unmute";
+    video_speed_prefix: "倍速 ", "Speed ";
+    video_subtitles: "字幕", "Subtitles";
+    video_subtitles_on: "字幕 开", "Subtitles on";
+    video_subtitles_off: "字幕 关", "Subtitles off";
+    video_fullscreen: "全屏", "Fullscreen";
+    video_exit_fullscreen: "退出全屏", "Exit fullscreen";
+    video_hint: "Space 播放/暂停 · ←/→ 快退/快进 5 秒 · PageUp/PageDown 或 Ctrl+←/→ 切换文件 · M 静音 · F 全屏 · S 字幕", "Space play/pause · ←/→ seek 5 s · PageUp/PageDown or Ctrl+←/→ change file · M mute · F fullscreen · S subtitles";
+    video_loading: "正在载入视频…", "Loading video…";
     audio_hint: "Space 播放/暂停 · ←/→ 快退/快进 5 秒 · PageUp/PageDown 或 Ctrl+←/→ 切歌 · M 静音", "Space play/pause · ←/→ seek 5 s · PageUp/PageDown or Ctrl+←/→ change track · M mute";
     image_fit: "适应窗口", "Fit";
     image_actual: "1:1", "1:1";
@@ -304,6 +318,10 @@ const PHRASES: &[(&str, &str)] = &[
     ("禁止 mpv 特殊伪协议前缀", "mpv special pseudo-protocol prefix is forbidden"),
     ("获取原生窗口句柄失败", "Failed to get native window handle"),
     ("应用强制沙箱参数", "Failed to apply sandbox option"),
+    ("无法播放视频", "Cannot play video"),
+    ("无法播放此音频", "Cannot play this audio"),
+    ("音频回退播放不可用", "Audio fallback playback is unavailable"),
+    ("未在可信目录找到", "Not found in trusted directory:"),
     ("失败", "failed"),
     ("行", "lines"),
     ("字号", "font size"),
