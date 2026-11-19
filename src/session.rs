@@ -5,10 +5,12 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Instant;
 
+use crate::config::{AppConfig, ConfigStore, RecentEntry};
 use crate::domain::{
     CloseDecision, FallbackInfo, FileEntry, MediaCategory, MotionProfile, ResolvedTheme,
     SiblingSequence, TextMode, ThemePreference, ViewerKind,
 };
+use crate::i18n::{Language, LanguagePreference};
 use crate::motion::{MotionChannel, MotionEngine, MotionSnapshot};
 use crate::ports::{Clock, SystemShell, VideoBackend};
 use crate::probing;
@@ -40,6 +42,9 @@ struct SessionState {
     text_font_size: f32,
     has_unsaved_changes: bool,
     theme_preference: ThemePreference,
+    language_preference: LanguagePreference,
+    auto_save: bool,
+    recent_enabled: bool,
     resolved_theme: ResolvedTheme,
     motion_profile: MotionProfile,
     motion_engine: MotionEngine,
@@ -54,6 +59,7 @@ pub struct AppSession {
     video_backend: Arc<dyn VideoBackend>,
     state: Arc<RwLock<SessionState>>,
     watcher: Mutex<Option<DirectoryWatcher>>,
+    store: Option<ConfigStore>,
     /// 文本编辑态缓冲区（工单 #11）；`Some` 即处于 Editing Mode
     editor: Mutex<Option<TextEditor>>,
     /// 因未保存修改而被拦截、等待用户决策的动作
@@ -103,6 +109,9 @@ impl AppSession {
                 text_font_size: DEFAULT_FONT_SIZE,
                 has_unsaved_changes: false,
                 theme_preference: ThemePreference::System,
+                language_preference: LanguagePreference::System,
+                auto_save: false,
+                recent_enabled: true,
                 resolved_theme,
                 motion_profile,
                 motion_engine,
@@ -110,10 +119,154 @@ impl AppSession {
                 started_at,
             })),
             watcher: Mutex::new(None),
+            store: None,
             editor: Mutex::new(None),
             pending: Mutex::new(None),
             exit_approved: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// 挂接持久化存储并载入已保存的偏好（主题、语言、自动保存、最近记录开关）。
+    pub fn with_config_store(mut self, store: ConfigStore) -> Self {
+        if let Ok(cfg) = store.load_config() {
+            self.apply_config(&cfg);
+        }
+        self.store = Some(store);
+        self
+    }
+
+    fn apply_config(&self, cfg: &AppConfig) {
+        let system_theme = self.shell.system_theme();
+        let mut g = self.state.write().unwrap();
+        g.theme_preference = cfg.theme;
+        g.resolved_theme = match cfg.theme {
+            ThemePreference::System => system_theme,
+            ThemePreference::Light => ResolvedTheme::Light,
+            ThemePreference::Dark => ResolvedTheme::Dark,
+        };
+        g.language_preference = cfg.language;
+        g.auto_save = cfg.auto_save;
+        g.recent_enabled = cfg.recent_enabled;
+    }
+
+    fn persist(&self, f: impl FnOnce(&mut AppConfig)) {
+        if let Some(store) = &self.store
+            && let Err(e) = store.update_config(f)
+        {
+            crate::diagnostics::error(&format!("保存配置失败：{e}"));
+        }
+    }
+
+    pub fn language_preference(&self) -> LanguagePreference {
+        self.state.read().unwrap().language_preference
+    }
+
+    /// 当前实际界面语言（默认跟随系统语言）
+    pub fn language(&self) -> Language {
+        self.language_preference()
+            .resolve(&self.shell.system_language())
+    }
+
+    pub fn set_language_preference(&self, pref: LanguagePreference) {
+        self.state.write().unwrap().language_preference = pref;
+        self.persist(|c| c.language = pref);
+    }
+
+    pub fn auto_save(&self) -> bool {
+        self.state.read().unwrap().auto_save
+    }
+
+    pub fn set_auto_save(&self, on: bool) {
+        self.state.write().unwrap().auto_save = on;
+        self.persist(|c| c.auto_save = on);
+    }
+
+    pub fn recent_enabled(&self) -> bool {
+        self.state.read().unwrap().recent_enabled
+    }
+
+    /// 开关最近记录；关闭时彻底清空已有记录。
+    pub fn set_recent_enabled(&self, on: bool) {
+        self.state.write().unwrap().recent_enabled = on;
+        if let Some(store) = &self.store
+            && let Err(e) = store.set_recent_enabled(on)
+        {
+            crate::diagnostics::error(&format!("保存最近记录开关失败：{e}"));
+        }
+    }
+
+    pub fn recent_files(&self) -> Vec<RecentEntry> {
+        self.store
+            .as_ref()
+            .and_then(|s| s.recent().ok())
+            .unwrap_or_default()
+    }
+
+    pub fn clear_recent(&self) {
+        if let Some(store) = &self.store {
+            let _ = store.clear_recent();
+        }
+    }
+
+    /// 复制当前文件的完整路径到剪贴板
+    pub fn copy_current_path(&self) -> Result<(), String> {
+        let path = self.require_current_path()?;
+        self.shell.copy_text_to_clipboard(&path.to_string_lossy())
+    }
+
+    /// 在资源管理器中显示当前文件
+    pub fn reveal_current_in_explorer(&self) -> Result<(), String> {
+        let path = self.require_current_path()?;
+        self.shell.reveal_in_explorer(&path)
+    }
+
+    fn require_current_path(&self) -> Result<std::path::PathBuf, String> {
+        self.state
+            .read()
+            .unwrap()
+            .current_file
+            .as_ref()
+            .map(|e| e.path.clone())
+            .ok_or_else(|| "当前未打开任何文件项".to_string())
+    }
+
+    /// 将当前文件移入回收站并同步同目录序列：优先切到下一项，否则上一项，否则回到欢迎空态。
+    pub fn delete_current_file(&self) -> Result<Option<FileEntry>, String> {
+        let (path, next) = {
+            let g = self.state.read().unwrap();
+            let cur = g
+                .current_file
+                .as_ref()
+                .ok_or_else(|| "当前未打开任何文件项".to_string())?;
+            let seq = &g.sibling_sequence;
+            let next = seq.current_index.and_then(|i| {
+                seq.entries
+                    .get(i + 1)
+                    .or_else(|| i.checked_sub(1).and_then(|j| seq.entries.get(j)))
+                    .map(|e| e.path.clone())
+            });
+            (cur.path.clone(), next)
+        };
+        self.shell.move_to_trash(&path)?;
+        if let Some(store) = &self.store {
+            let _ = store.remove_recent(&path);
+        }
+        crate::diagnostics::info("已将文件移入回收站");
+        if let Some(n) = next
+            && let Ok(entry) = self.open_file_internal(&n, true)
+        {
+            return Ok(Some(entry));
+        }
+        let mut g = self.state.write().unwrap();
+        g.current_file = None;
+        g.active_viewer = ViewerKind::Welcome;
+        g.detected_format.clear();
+        g.available_viewers.clear();
+        g.fallback_info = None;
+        g.sibling_sequence = SiblingSequence::empty();
+        g.sibling_filter_category = None;
+        g.has_unsaved_changes = false;
+        Ok(None)
     }
 
     /// 获取当前激活的查看器视图
@@ -309,6 +462,8 @@ impl AppSession {
             ThemePreference::Light => ResolvedTheme::Light,
             ThemePreference::Dark => ResolvedTheme::Dark,
         };
+        drop(guard);
+        self.persist(|c| c.theme = preference);
     }
 
     /// 重新从 `SystemShell` 同步系统深浅色主题与“减弱动态效果”设置
@@ -600,6 +755,9 @@ impl AppSession {
         );
         drop(guard);
 
+        if let Some(store) = &self.store {
+            let _ = store.add_recent(path);
+        }
         self.ensure_watching_parent(path);
 
         Ok(entry)

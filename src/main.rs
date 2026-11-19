@@ -14,6 +14,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use anyfile::config::{ConfigStore, StorageMode, current_data_location};
+use anyfile::diagnostics;
+use anyfile::domain::ThemePreference;
+use anyfile::i18n::{LanguagePreference, UiStrings, large_file_notice, localize, text_meta_line};
+use anyfile::ports::SystemShell;
+use anyfile::ui_text::apply_ui_strings;
+use anyfile::update_check::{CurlReleaseSource, UpdateStatus, check_for_update};
 use anyfile::audio_viewer::{AudioCommand, AudioKey, AudioPlayer, AudioViewer, KeyModifiers};
 use anyfile::domain::{CloseDecision, MotionProfile, ViewerKind};
 use anyfile::motion::{MotionChannel, MotionSnapshot};
@@ -64,7 +71,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shell = Arc::new(PlatformSystemShell);
     let clock = Arc::new(SystemClock);
     let video = Arc::new(UnavailableVideoBackend);
-    let session = Arc::new(AppSession::new(shell, clock, video));
+    let data_loc = current_data_location();
+    diagnostics::init(&data_loc.dir);
+    diagnostics::info("AnyFile 启动");
+    let mut session = AppSession::new(shell, clock, video);
+    if let Ok(store) = ConfigStore::open(&data_loc.dir) {
+        session = session.with_config_store(store);
+    }
+    let session = Arc::new(session);
+    let storage_mode = data_loc.mode;
 
     if let Some(ref path) = opts.target_path {
         let _ = session.open_file(path);
@@ -75,6 +90,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let renderer_label = active_renderer.display_label();
     sync_session_to_window(&window, &session, renderer_label);
     sync_motion_to_window(&window, session.motion_snapshot());
+    window.set_version_text(env!("CARGO_PKG_VERSION").into());
+    sync_settings_to_window(&window, &session, storage_mode);
 
     // 3.1 按需物理弹簧动画帧驱动（仅在存在活跃动画时以 120Hz 节拍推进，收敛后自动停表零空转）
     let motion_timer = Rc::new(slint::Timer::default());
@@ -207,6 +224,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
+
+    wire_settings_and_ops(&window, &session, renderer_label, storage_mode);
 
     // 音频视图回调（命令 -> AudioViewer；切歌后同步整个窗口状态）
     {
@@ -427,7 +446,7 @@ fn sync_audio_to_window(window: &MainWindow, session: &AppSession) {
     window.set_audio_title(meta.title.clone().into());
     window.set_audio_artist(meta.artist.clone().unwrap_or_default().into());
     window.set_audio_album(meta.album.clone().unwrap_or_default().into());
-    let mut fmt = session.detected_format();
+    let mut fmt = localize(&session.detected_format(), session.language());
     if let Some(rate) = meta.sample_rate {
         fmt.push_str(&format!(" · {:.1} kHz", rate as f32 / 1000.0));
     }
@@ -457,7 +476,7 @@ fn sync_audio_to_window(window: &MainWindow, session: &AppSession) {
     window.set_audio_volume(snap.volume);
     window.set_audio_muted(snap.muted);
     window.set_audio_auto_next(state.auto_next);
-    window.set_audio_error(state.error.unwrap_or_default().into());
+    window.set_audio_error(localize(&state.error.unwrap_or_default(), session.language()).into());
 }
 
 fn sync_motion_to_window(window: &MainWindow, snapshot: MotionSnapshot) {
@@ -470,7 +489,7 @@ fn sync_motion_to_window(window: &MainWindow, snapshot: MotionSnapshot) {
 fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_label: &str) {
     window.set_dark_mode(session.resolved_theme().is_dark());
     window.set_reduced_motion(session.motion_profile().reduced_motion);
-    window.set_renderer_label(renderer_label.into());
+    window.set_renderer_label(localize(renderer_label, session.language()).into());
 
     let viewer = session.active_viewer();
     let viewer_key = match viewer {
@@ -482,7 +501,7 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
         ViewerKind::Unsupported => "unsupported",
     };
     window.set_active_viewer(viewer_key.into());
-    window.set_detected_format(session.detected_format().into());
+    window.set_detected_format(localize(&session.detected_format(), session.language()).into());
 
     let seq = session.sibling_sequence();
     window.set_filter_by_category(seq.filter_by_category);
@@ -504,18 +523,51 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
         && viewer != ViewerKind::Unsupported
         && (viewers.len() > 1 || viewer != ViewerKind::Text);
     window.set_show_switch_viewer(show_switch);
+    let tr = UiStrings::for_language(session.language());
+    apply_ui_strings(window, &tr);
     let switch_label = if viewer == ViewerKind::Text && viewers.len() > 1 {
-        "切换查看器"
+        tr.switch_viewer.clone()
     } else {
-        "以文本打开"
+        tr.open_as_text.clone()
     };
     window.set_switch_viewer_label(switch_label.into());
+    let recents = if session.recent_enabled() {
+        session.recent_files()
+    } else {
+        Vec::new()
+    };
+    let names: Vec<slint::SharedString> = recents
+        .iter()
+        .take(5)
+        .map(|r| {
+            std::path::Path::new(&r.path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| r.path.clone())
+                .into()
+        })
+        .collect();
+    let paths: Vec<slint::SharedString> = recents
+        .iter()
+        .take(5)
+        .map(|r| r.path.as_str().into())
+        .collect();
+    window.set_recent_names(slint::ModelRc::new(slint::VecModel::from(names)));
+    window.set_recent_paths(slint::ModelRc::new(slint::VecModel::from(paths)));
+    let hint = if !session.recent_enabled() {
+        tr.recent_off.clone()
+    } else if recents.is_empty() {
+        tr.recent_none.clone()
+    } else {
+        tr.recent_title.clone()
+    };
+    window.set_recent_hint(hint.into());
 
     sync_text_view(window, session);
 
     if let Some(fallback) = session.fallback_info() {
         window.set_fallback_size_text(fallback.formatted_size().into());
-        window.set_fallback_reason(fallback.reason_message.into());
+        window.set_fallback_reason(localize(&fallback.reason_message, session.language()).into());
     } else {
         window.set_fallback_size_text("".into());
         window.set_fallback_reason("".into());
@@ -526,17 +578,17 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
             .path
             .file_name()
             .and_then(|s| s.to_str())
-            .unwrap_or("未命名文件")
+            .unwrap_or(tr.unnamed_file.as_str())
             .to_string();
         window.set_app_title(format!("{file_name} — AnyFile").into());
         window.set_current_file_name(file_name.into());
         window.set_current_file_path(entry.path.display().to_string().into());
-        window.set_status_subtitle(format!("已打开：{}", entry.path.display()).into());
+        window.set_status_subtitle(format!("{}{}", tr.opened_prefix, entry.path.display()).into());
     } else {
         window.set_app_title("AnyFile".into());
         window.set_current_file_name("".into());
         window.set_current_file_path("".into());
-        window.set_status_subtitle("拖放任意文件到此处，或点击下方按钮打开".into());
+        window.set_status_subtitle(tr.welcome_subtitle.as_str().into());
     }
     sync_audio_to_window(window, session);
     editor_glue::sync_state(window, session);
@@ -555,26 +607,24 @@ fn sync_text_view(window: &MainWindow, session: &AppSession) {
         return;
     };
     let find = session.text_find_state();
-    window.set_text_find_status(find.status_text().into());
+    let lang = session.language();
+    window.set_text_find_status(localize(&find.status_text(), lang).into());
     window.set_text_gutter_digits(doc.lines.len().max(1).to_string().len() as i32);
     window.set_text_rows(ModelRc::new(TextLinesModel::new(doc.clone(), &find)));
     let m = &doc.meta;
     window.set_text_meta(
-        format!(
-            "{} · {} · {} 行 · {} · 字号 {:.0}px",
+        text_meta_line(
+            lang,
             m.encoding.label(),
             m.line_ending.label(),
             doc.lines.len(),
             m.syntax.label(),
-            session.text_font_size()
+            session.text_font_size(),
         )
         .into(),
     );
     let notice = if m.is_large_file_readonly {
-        format!(
-            "大文件只读保护（{:.1} MB）：仅预览前 2 MB，已禁用编辑",
-            m.file_size as f64 / 1_048_576.0
-        )
+        large_file_notice(lang, m.file_size as f64 / 1_048_576.0)
     } else {
         String::new()
     };
@@ -713,4 +763,207 @@ fn install_windows_window_shell(window: &MainWindow, session: &AppSession) {
             shell_handle.close();
         });
     });
+}
+
+fn sync_settings_to_window(window: &MainWindow, session: &AppSession, mode: StorageMode) {
+    let tr = UiStrings::for_language(session.language());
+    window.set_theme_index(match session.theme_preference() {
+        ThemePreference::System => 0,
+        ThemePreference::Light => 1,
+        ThemePreference::Dark => 2,
+    });
+    window.set_language_index(session.language_preference().to_index());
+    window.set_auto_save(session.auto_save());
+    window.set_recent_enabled(session.recent_enabled());
+    let storage = match mode {
+        StorageMode::Portable => tr.storage_portable,
+        StorageMode::Installed => tr.storage_installed,
+    };
+    window.set_storage_text(storage.as_str().into());
+}
+
+fn show_toast(window: &MainWindow, text: String) {
+    window.set_toast_text(text.into());
+    let weak = window.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(2500), move || {
+        if let Some(w) = weak.upgrade() {
+            w.set_toast_text("".into());
+        }
+    });
+}
+
+thread_local! {
+    /// 最近一次检查到的新版本发布页（仅 UI 线程）
+    static RELEASE_URL: RefCell<String> =
+        RefCell::new(anyfile::update_check::RELEASES_PAGE.to_string());
+}
+
+/// 绑定文件轻量操作与设置 / 关于页回调
+fn wire_settings_and_ops(
+    window: &MainWindow,
+    session: &Arc<AppSession>,
+    renderer_label: &'static str,
+    mode: StorageMode,
+) {
+    let refresh = {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        Rc::new(move || {
+            if let Some(w) = weak.upgrade() {
+                sync_session_to_window(&w, &session, renderer_label);
+                sync_settings_to_window(&w, &session, mode);
+            }
+        })
+    };
+
+    {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        let refresh = Rc::clone(&refresh);
+        window.on_delete_clicked(move || {
+            let result = session.delete_current_file();
+            refresh();
+            if let Some(w) = weak.upgrade() {
+                let tr = UiStrings::for_language(session.language());
+                match result {
+                    Ok(_) => show_toast(&w, tr.toast_deleted),
+                    Err(e) => show_toast(&w, format!("{}{}", tr.toast_failed_prefix, localize(&e, session.language()))),
+                }
+            }
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        window.on_copy_path_clicked(move || {
+            let result = session.copy_current_path();
+            if let Some(w) = weak.upgrade() {
+                let tr = UiStrings::for_language(session.language());
+                match result {
+                    Ok(()) => show_toast(&w, tr.toast_copied),
+                    Err(e) => show_toast(&w, format!("{}{}", tr.toast_failed_prefix, localize(&e, session.language()))),
+                }
+            }
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        window.on_reveal_clicked(move || {
+            if let Err(e) = session.reveal_current_in_explorer()
+                && let Some(w) = weak.upgrade()
+            {
+                let tr = UiStrings::for_language(session.language());
+                show_toast(&w, format!("{}{}", tr.toast_failed_prefix, localize(&e, session.language())));
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_settings_clicked(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_settings_open(true);
+            }
+        });
+        let weak = window.as_weak();
+        window.on_settings_closed(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_settings_open(false);
+            }
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let refresh = Rc::clone(&refresh);
+        window.on_theme_selected(move |i| {
+            session.set_theme_preference(match i {
+                1 => ThemePreference::Light,
+                2 => ThemePreference::Dark,
+                _ => ThemePreference::System,
+            });
+            refresh();
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let refresh = Rc::clone(&refresh);
+        window.on_language_selected(move |i| {
+            session.set_language_preference(LanguagePreference::from_index(i));
+            refresh();
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let refresh = Rc::clone(&refresh);
+        window.on_auto_save_toggled(move || {
+            session.set_auto_save(!session.auto_save());
+            refresh();
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let refresh = Rc::clone(&refresh);
+        window.on_recent_toggled(move || {
+            session.set_recent_enabled(!session.recent_enabled());
+            refresh();
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let refresh = Rc::clone(&refresh);
+        window.on_clear_recent_clicked(move || {
+            session.clear_recent();
+            refresh();
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        window.on_check_update_clicked(move || {
+            let Some(w) = weak.upgrade() else { return };
+            if w.get_update_checking() {
+                return;
+            }
+            w.set_update_checking(true);
+            w.set_update_available(false);
+            w.set_update_text("".into());
+            let weak = weak.clone();
+            let lang = session.language();
+            // 仅用户点击时联网一次；线程用完即退，无常驻
+            std::thread::spawn(move || {
+                let status = check_for_update(&CurlReleaseSource, env!("CARGO_PKG_VERSION"));
+                diagnostics::info("手动检查更新完成");
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(w) = weak.upgrade() else { return };
+                    let tr = UiStrings::for_language(lang);
+                    w.set_update_checking(false);
+                    match status {
+                        UpdateStatus::UpToDate => {
+                            w.set_update_text(tr.update_up_to_date.as_str().into())
+                        }
+                        UpdateStatus::Available { version, url } => {
+                            w.set_update_available(true);
+                            w.set_update_text(
+                                format!("{}{version}", tr.update_available_prefix).into(),
+                            );
+                            RELEASE_URL.with(|u| *u.borrow_mut() = url);
+                        }
+                        UpdateStatus::Failed(e) => w
+                            .set_update_text(format!("{}{}", tr.update_failed_prefix, localize(&e, lang)).into()),
+                    }
+                });
+            });
+        });
+    }
+    {
+        let shell = PlatformSystemShell;
+        window.on_open_release_page_clicked(move || {
+            let url = RELEASE_URL.with(|u| u.borrow().clone());
+            let _ = shell.open_url(&url);
+        });
+        let shell = PlatformSystemShell;
+        window.on_open_default_apps_clicked(move || {
+            let _ = shell.open_default_apps_settings();
+        });
+    }
 }

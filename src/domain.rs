@@ -188,7 +188,8 @@ impl MotionProfile {
 }
 
 /// 用户主题偏好设置
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ThemePreference {
     /// 跟随 Windows 深浅色系统设置（默认）
     #[default]

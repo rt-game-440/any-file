@@ -243,6 +243,8 @@ dependencies = [
  "lofty",
  "notify",
  "raw-window-handle",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
  "symphonia",
