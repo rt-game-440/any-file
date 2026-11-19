@@ -1,0 +1,942 @@
+// AnyFile 主窗口视图（含无边框自定义标题栏、物理弹簧动效绑定、同目录导航栏、查看器切换入口与兜底信息卡）
+
+import { TextViewer, TextRow, TextSegment } from "text_viewer.slint";
+export { TextRow, TextSegment }
+import { TextEditorView, EditorState } from "text_editor.slint";
+export { EditorState }
+import { AudioViewerPanel } from "audio_viewer.slint";
+import { VideoViewerPanel } from "video_viewer.slint";
+import { Tr } from "i18n.slint";
+import { SettingsOverlay } from "settings_overlay.slint";
+import { ImageViewerPanel, ImageState } from "image_viewer.slint";
+
+export { Tr, ImageState }
+
+component ActionPill inherits TouchArea {
+    in property <string> label;
+    in property <bool> dark-mode: false;
+    in property <bool> primary: false;
+    in property <bool> enabled-state: true;
+
+    height: 34px;
+    mouse-cursor: root.enabled-state ? pointer : default;
+    enabled: root.enabled-state;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 8px;
+        border-width: root.primary ? 0px : 1px;
+        border-color: root.dark-mode ? #343944 : #D6DCE6;
+        background: !root.enabled-state
+            ? (root.dark-mode ? #20232A : #ECEFF4)
+            : root.primary
+                ? (parent.pressed
+                    ? (root.dark-mode ? #2A63C9 : #1D53B8)
+                    : (parent.has-hover
+                        ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
+                        : (root.dark-mode ? #3370E3 : #2563EB)))
+                : (parent.pressed
+                    ? (root.dark-mode ? #2B303B : #DDE3EC)
+                    : (parent.has-hover
+                        ? (root.dark-mode ? #252A34 : #E7ECF3)
+                        : (root.dark-mode ? #1E2129 : #FFFFFF)));
+
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            alignment: center;
+
+            Text {
+                text: root.label;
+                font-size: 13px;
+                font-weight: root.primary ? 600 : 500;
+                vertical-alignment: center;
+                color: !root.enabled-state
+                    ? (root.dark-mode ? #5A6272 : #9BA4B5)
+                    : root.primary
+                        ? #FFFFFF
+                        : (root.dark-mode ? #E2E6EE : #1E2430);
+            }
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    in property <bool> dark-mode: false;
+    in property <string> app-title: "AnyFile";
+    in property <string> status-subtitle: Tr.welcome-subtitle;
+    in property <string> renderer-label: "Skia";
+    in property <bool> reduced-motion: false;
+    in property <bool> is-maximized: false;
+    in property <bool> max-button-hovered: false;
+    // 由 Rust 统一物理弹簧驱动实时写入的动效状态
+    in property <float> welcome-progress: 1.0;
+    in property <float> view-transition: 1.0;
+    in property <float> button-scale: 1.0;
+
+    // 视图与文件项状态（工单 #5）
+    in property <string> active-viewer: "welcome";
+    in property <string> current-file-name: "";
+    in property <string> current-file-path: "";
+    in property <string> detected-format: "";
+    in property <string> sibling-position-text: "";
+    in property <bool> can-go-prev: false;
+    in property <bool> can-go-next: false;
+    in property <bool> filter-by-category: true;
+    in property <string> switch-viewer-label: Tr.open-as-text;
+    in property <bool> show-switch-viewer: false;
+
+    // 兜底信息卡状态
+    in property <string> fallback-size-text: "";
+    in property <string> fallback-reason: "";
+
+    in property <string> toast-text: "";
+    in property <string> recent-hint: "";
+    in property <[string]> recent-names: [];
+    in property <[string]> recent-paths: [];
+    in property <bool> settings-open: false;
+    in property <int> theme-index: 0;
+    in property <int> language-index: 0;
+    in property <bool> auto-save: false;
+    in property <bool> recent-enabled: true;
+    in property <string> version-text: "";
+    in property <string> storage-text: "";
+    in property <string> update-text: "";
+    in property <bool> update-available: false;
+    in property <bool> update-checking: false;
+    callback delete-clicked();
+    callback copy-path-clicked();
+    callback reveal-clicked();
+    callback settings-clicked();
+    callback settings-closed();
+    callback theme-selected(int);
+    callback language-selected(int);
+    callback auto-save-toggled();
+    callback recent-toggled();
+    callback clear-recent-clicked();
+    callback check-update-clicked();
+    callback open-release-page-clicked();
+    callback open-default-apps-clicked();
+    callback open-file-clicked();
+    callback open-button-state-changed(bool, bool);
+    callback minimize-clicked();
+    callback maximize-clicked();
+    callback close-clicked();
+    callback prev-sibling-clicked();
+    callback next-sibling-clicked();
+    callback toggle-filter-clicked();
+    callback switch-viewer-clicked();
+    callback open-with-other-app-clicked();
+    callback file-dropped(string);
+
+    // 文本查看态（工单 #10）
+    in property <[TextRow]> text-rows;
+    in property <length> text-font-size: 14px;
+    in property <string> text-meta: "";
+    in property <string> text-notice: "";
+    in property <string> text-find-status: "";
+    in property <int> text-gutter-digits: 3;
+    in property <int> text-scroll-line: -1;
+    in property <int> text-scroll-tick: 0;
+    callback text-find-changed(string, bool);
+    callback text-find-next();
+    callback text-find-prev();
+    callback text-find-closed();
+    callback text-zoom-wheel(float);
+    callback text-zoom-reset();
+    property <int> find-tick: 0;
+    // 音频视图
+    in property <string> audio-title: "";
+    in property <string> audio-artist: "";
+    in property <string> audio-album: "";
+    in property <string> audio-format: "";
+    in property <image> audio-cover;
+    in property <bool> audio-has-cover: false;
+    in property <float> audio-position-secs: 0;
+    in property <float> audio-duration-secs: 0;
+    in property <string> audio-position-text: "0:00";
+    in property <string> audio-duration-text: "0:00";
+    in property <bool> audio-playing: false;
+    in property <string> audio-speed-text: "1x";
+    in property <float> audio-volume: 1.0;
+    in property <bool> audio-muted: false;
+    in property <bool> audio-auto-next: false;
+    in property <string> audio-error: "";
+    callback audio-key(string, bool) -> bool;
+    callback audio-toggle-play();
+    callback audio-seek-to(float);
+    callback audio-cycle-speed();
+    callback audio-set-volume(float);
+    callback audio-toggle-mute();
+    callback audio-prev-track();
+    callback audio-next-track();
+    callback audio-toggle-auto-next();
+
+    // 视频视图
+    in property <image> video-frame;
+    in property <bool> video-has-frame: false;
+    in property <float> video-position-secs: 0;
+    in property <float> video-duration-secs: 0;
+    in property <string> video-position-text: "0:00";
+    in property <string> video-duration-text: "0:00";
+    in property <bool> video-playing: false;
+    in property <string> video-speed-text: "1x";
+    in property <float> video-volume: 1.0;
+    in property <bool> video-muted: false;
+    in property <bool> video-subtitles-visible: true;
+    in property <bool> video-has-subtitles: false;
+    in property <bool> video-fullscreen: false;
+    in property <bool> video-controls-visible: true;
+    in property <string> video-error: "";
+    callback video-key(string, bool) -> bool;
+    callback video-toggle-play();
+    callback video-seek-to(float);
+    callback video-cycle-speed();
+    callback video-set-volume(float);
+    callback video-toggle-mute();
+    callback video-prev-file();
+    callback video-next-file();
+    callback video-toggle-subtitles();
+    callback video-toggle-fullscreen();
+    callback video-activity();
+    callback video-hover-controls(bool);
+    callback video-area-resized(length, length);
+
+    no-frame: true;
+    title: root.app-title;
+    preferred-width: 780px;
+    preferred-height: 540px;
+    min-width: 500px;
+    min-height: 380px;
+    background: root.dark-mode ? #141518 : #F6F7F9;
+
+    key-handler := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            if (root.active-viewer == "text" && !EditorState.active && event.modifiers.control) {
+                if (event.text == "e") {
+                    EditorState.begin();
+                    return accept;
+                }
+                if (event.text == "f") {
+                    root.find-tick += 1;
+                    return accept;
+                }
+                if (event.text == "0") {
+                    root.text-zoom-reset();
+                    return accept;
+                }
+                if (event.text == "=" || event.text == "+") {
+                    root.text-zoom-wheel(1.0);
+                    return accept;
+                }
+                if (event.text == "-") {
+                    root.text-zoom-wheel(-1.0);
+                    return accept;
+                }
+            }
+            if (root.active-viewer == "audio") {
+                if (root.audio-key(event.text, event.modifiers.control)) {
+                    return accept;
+                }
+            }
+            if (root.active-viewer == "image") {
+                if (ImageState.key(event.text, event.modifiers.control, event.modifiers.shift)) {
+                    return accept;
+                }
+            }
+            if (root.active-viewer == "video") {
+                if (root.video-key(event.text, event.modifiers.control)) {
+                    return accept;
+                }
+            }
+            if (event.text == Key.Delete && root.active-viewer != "welcome" && !root.settings-open && !EditorState.active) {
+                root.delete-clicked();
+                return accept;
+            }
+            if (root.active-viewer != "welcome" && root.active-viewer != "audio" && root.active-viewer != "video" && !EditorState.active) {
+                if (event.text == Key.LeftArrow && root.can-go-prev) {
+                    root.prev-sibling-clicked();
+                    return accept;
+                }
+                if (event.text == Key.RightArrow && root.can-go-next) {
+                    root.next-sibling-clicked();
+                    return accept;
+                }
+            }
+            return reject;
+        }
+
+        if root.active-viewer == "image" : ImageViewerPanel {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            dark-mode: root.dark-mode;
+            reduced-motion: root.reduced-motion;
+        }
+
+        VerticalLayout {
+            padding: 0px;
+            spacing: 0px;
+
+            // 无边框自定义标题栏（高度 36px，与 TitleBarMetrics::default().height_logical 严格对齐）
+            Rectangle {
+                height: 36px;
+                background: root.dark-mode ? #181A1F : #ECEFF4;
+                opacity: root.active-viewer == "image" && !ImageState.chrome-visible ? 0.0 : 1.0;
+                animate opacity { duration: root.reduced-motion ? 0ms : 260ms; easing: ease-out; }
+
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 0px;
+                    spacing: 0px;
+
+                    // 左侧标题区域（由 Win32 WM_NCHITTEST 映射为 HTCAPTION，支持拖拽/双击最大化/Aero Snap）
+                    HorizontalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 8px;
+                        alignment: start;
+
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: root.dark-mode ? #3B82F6 : #2563EB;
+                        }
+
+                        Text {
+                            text: root.app-title;
+                            font-size: 12.5px;
+                            font-weight: 500;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            color: root.dark-mode ? #D8DDE8 : #262C36;
+                        }
+                    }
+
+                    // 右侧原生窗口控制按钮组（每枚宽 46px，与 TitleBarMetrics::default().button_width_logical 对齐）
+                    HorizontalLayout {
+                        spacing: 0px;
+
+                        // 最小化按钮
+                        TouchArea {
+                            width: 46px;
+                            height: 36px;
+                            clicked => {
+                                root.minimize-clicked();
+                            }
+
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                background: parent.pressed
+                                    ? (root.dark-mode ? #2B303A : #D5DBE5)
+                                    : (parent.has-hover
+                                        ? (root.dark-mode ? #232730 : #E0E5EE)
+                                        : transparent);
+
+                                Rectangle {
+                                    width: 10px;
+                                    height: 1px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    background: root.dark-mode ? #DCE1EB : #252B36;
+                                }
+                            }
+                        }
+
+                        // 最大化 / 还原按钮（Win32 WM_NCHITTEST 返回 HTMAXBUTTON 以保留 Win11 Snap Layouts）
+                        TouchArea {
+                            width: 46px;
+                            height: 36px;
+                            clicked => {
+                                root.maximize-clicked();
+                            }
+
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                background: parent.pressed
+                                    ? (root.dark-mode ? #2B303A : #D5DBE5)
+                                    : ((parent.has-hover || root.max-button-hovered)
+                                        ? (root.dark-mode ? #232730 : #E0E5EE)
+                                        : transparent);
+
+                                if !root.is-maximized : Rectangle {
+                                    width: 10px;
+                                    height: 10px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    border-width: 1px;
+                                    border-color: root.dark-mode ? #DCE1EB : #252B36;
+                                    background: transparent;
+                                }
+
+                                if root.is-maximized : Rectangle {
+                                    width: 11px;
+                                    height: 11px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    background: transparent;
+
+                                    // 后层方框
+                                    Rectangle {
+                                        x: 2px;
+                                        y: 0px;
+                                        width: 9px;
+                                        height: 9px;
+                                        border-width: 1px;
+                                        border-color: root.dark-mode ? #DCE1EB : #252B36;
+                                        background: transparent;
+                                    }
+
+                                    // 前层方框
+                                    Rectangle {
+                                        x: 0px;
+                                        y: 2px;
+                                        width: 9px;
+                                        height: 9px;
+                                        border-width: 1px;
+                                        border-color: root.dark-mode ? #DCE1EB : #252B36;
+                                        background: root.dark-mode ? #181A1F : #ECEFF4;
+                                    }
+                                }
+                            }
+                        }
+
+                        // 关闭按钮
+                        close-ta := TouchArea {
+                            width: 46px;
+                            height: 36px;
+                            clicked => {
+                                root.close-clicked();
+                            }
+
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                background: close-ta.pressed
+                                    ? #B02418
+                                    : (close-ta.has-hover ? #C42B1C : transparent);
+
+                                Text {
+                                    text: "✕";
+                                    font-size: 11px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    color: (close-ta.has-hover || close-ta.pressed)
+                                        ? #FFFFFF
+                                        : (root.dark-mode ? #DCE1EB : #252B36);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 标题栏底部分隔线
+            Rectangle {
+                height: 1px;
+                background: root.dark-mode ? #252932 : #DCE1EA;
+            }
+
+            // 主内容区（随物理弹簧平滑入场与视图过渡）
+            VerticalLayout {
+                vertical-stretch: 1;
+                padding-left: 24px;
+                padding-right: 24px;
+                padding-top: 24px + (1.0 - root.welcome-progress) * 14px;
+                padding-bottom: 24px;
+                spacing: 16px;
+                opacity: clamp(root.welcome-progress * root.view-transition, 0.0, 1.0);
+
+                // 顶部导航与操作工具栏（仅在已打开文件时显示）
+                if root.active-viewer != "welcome" : HorizontalLayout {
+                    spacing: 8px;
+                    alignment: space-between;
+                    opacity: root.active-viewer == "image" && !ImageState.chrome-visible ? 0.0 : 1.0;
+                    animate opacity { duration: root.reduced-motion ? 0ms : 260ms; easing: ease-out; }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+
+                        ActionPill {
+                            label: Tr.prev-item;
+                            dark-mode: root.dark-mode;
+                            enabled-state: root.can-go-prev;
+                            clicked => { root.prev-sibling-clicked(); }
+                        }
+
+                        ActionPill {
+                            label: Tr.next-item;
+                            dark-mode: root.dark-mode;
+                            enabled-state: root.can-go-next;
+                            clicked => { root.next-sibling-clicked(); }
+                        }
+
+                        if root.sibling-position-text != "" : Text {
+                            text: root.sibling-position-text;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            color: root.dark-mode ? #9DA5B4 : #5A6475;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
+
+                        ActionPill {
+                            label: root.filter-by-category ? Tr.filter-same-kind : Tr.filter-all;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.toggle-filter-clicked(); }
+                        }
+
+                        if !EditorState.active : ActionPill {
+                            label: Tr.op-copy-path;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.copy-path-clicked(); }
+                        }
+
+                        if !EditorState.active : ActionPill {
+                            label: Tr.op-reveal;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.reveal-clicked(); }
+                        }
+
+                        if !EditorState.active : ActionPill {
+                            label: Tr.op-delete;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.delete-clicked(); }
+                        }
+
+                        if root.active-viewer != "unsupported" && !EditorState.active : ActionPill {
+                            label: Tr.open-with-other-app;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.open-with-other-app-clicked(); }
+                        }
+
+                        if root.active-viewer == "text" && !EditorState.active : ActionPill {
+                            label: Tr.editor-begin;
+                            dark-mode: root.dark-mode;
+                            clicked => { EditorState.begin(); }
+                        }
+
+                        if root.show-switch-viewer && !EditorState.active : ActionPill {
+                            label: root.switch-viewer-label;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.switch-viewer-clicked(); }
+                        }
+                    }
+                }
+
+                // 中央主内容区：欢迎空态 / 兜底信息卡 / 已识别媒体视图
+                VerticalLayout {
+                    vertical-stretch: 1;
+                    alignment: root.active-viewer == "text" ? stretch : center;
+
+                    if root.active-viewer == "text" && EditorState.active : TextEditorView {
+                        vertical-stretch: 1;
+                    }
+
+                    if root.active-viewer == "text" && !EditorState.active : TextViewer {
+                        focus-find-tick: root.find-tick;
+                        scroll-line: root.text-scroll-line;
+                        scroll-tick: root.text-scroll-tick;
+                        vertical-stretch: 1;
+                        rows: root.text-rows;
+                        dark-mode: root.dark-mode;
+                        font-size: root.text-font-size;
+                        meta-text: root.text-meta;
+                        notice-text: root.text-notice;
+                        find-status: root.text-find-status;
+                        gutter-digits: root.text-gutter-digits;
+                        find-changed(q, c) => { root.text-find-changed(q, c); }
+                        find-next => { root.text-find-next(); }
+                        find-prev => { root.text-find-prev(); }
+                        find-closed => { root.text-find-closed(); key-handler.focus(); }
+                        zoom-wheel(d) => { root.text-zoom-wheel(d); }
+                    }
+
+                    // 1. 极简欢迎 / 拖放空态（保留物理弹性按钮反馈）
+                    if root.active-viewer == "welcome" : HorizontalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            preferred-width: 520px;
+                            min-width: 360px;
+                            max-width: 520px;
+                            height: 280px;
+                            border-radius: 18px;
+                            border-width: 1.5px;
+                            border-color: root.dark-mode ? #2C3038 : #D9DEE7;
+                            background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+                            VerticalLayout {
+                                padding: 32px;
+                                spacing: 14px;
+                                alignment: center;
+
+                                Text {
+                                    text: "AnyFile";
+                                    font-size: 28px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    color: root.dark-mode ? #F3F5F8 : #15181E;
+                                }
+
+                                Text {
+                                    text: root.status-subtitle;
+                                    font-size: 14px;
+                                    horizontal-alignment: center;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                                }
+
+                                VerticalLayout {
+                                    spacing: 2px;
+                                    for name[i] in root.recent-names : TouchArea {
+                                        height: 22px;
+                                        mouse-cursor: pointer;
+                                        clicked => { root.file-dropped(root.recent-paths[i]); }
+                                        Text {
+                                            text: name;
+                                            font-size: 12px;
+                                            horizontal-alignment: center;
+                                            color: parent.has-hover ? #2563EB : (root.dark-mode ? #9DA5B4 : #5A6475);
+                                        }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    padding-top: 8px;
+
+                                    Rectangle {
+                                        width: 164px;
+                                        height: 44px;
+
+                                        open-touch := TouchArea {
+                                            width: 156px * clamp(root.button-scale, 0.85, 1.15);
+                                            height: 40px * clamp(root.button-scale, 0.85, 1.15);
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.open-file-clicked();
+                                            }
+                                            changed has-hover => {
+                                                root.open-button-state-changed(self.has-hover, self.pressed);
+                                            }
+                                            changed pressed => {
+                                                root.open-button-state-changed(self.has-hover, self.pressed);
+                                            }
+
+                                            Rectangle {
+                                                width: parent.width;
+                                                height: parent.height;
+                                                border-radius: 10px;
+                                                background: open-touch.pressed
+                                                    ? (root.dark-mode ? #2A63C9 : #1D53B8)
+                                                    : (open-touch.has-hover
+                                                        ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
+                                                        : (root.dark-mode ? #3370E3 : #2563EB));
+
+                                                Text {
+                                                    text: Tr.open-file;
+                                                    font-size: 14px;
+                                                    font-weight: 600;
+                                                    color: #FFFFFF;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. 纯二进制或损坏文件的友好兜底信息卡
+                    if root.active-viewer == "unsupported" : HorizontalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            preferred-width: 560px;
+                            min-width: 380px;
+                            max-width: 560px;
+                            border-radius: 18px;
+                            border-width: 1.5px;
+                            border-color: root.dark-mode ? #383034 : #E5D7D9;
+                            background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+                            VerticalLayout {
+                                padding: 28px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: Tr.unsupported-title;
+                                    font-size: 20px;
+                                    font-weight: 700;
+                                    color: root.dark-mode ? #F3F5F8 : #15181E;
+                                }
+
+                                Text {
+                                    text: root.fallback-reason;
+                                    font-size: 14px;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #C9A4A8 : #8C3D47;
+                                }
+
+                                Rectangle {
+                                    height: 1px;
+                                    background: root.dark-mode ? #2C3038 : #E6EAF0;
+                                }
+
+                                Text {
+                                    text: Tr.path-prefix + root.current-file-path;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                                }
+
+                                Text {
+                                    text: Tr.size-prefix + root.fallback-size-text + "   •   " + Tr.detected-prefix + root.detected-format;
+                                    font-size: 12px;
+                                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                                }
+
+                                HorizontalLayout {
+                                    padding-top: 8px;
+                                    spacing: 10px;
+                                    alignment: start;
+
+                                    ActionPill {
+                                        label: Tr.open-with-other-app;
+                                        dark-mode: root.dark-mode;
+                                        primary: true;
+                                        clicked => { root.open-with-other-app-clicked(); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 视频视图（全屏时由窗口级覆盖层承载）
+                    if root.active-viewer == "video" && !root.video-fullscreen : VideoViewerPanel {
+                        vertical-stretch: 1;
+                        frame: root.video-frame;
+                        has-frame: root.video-has-frame;
+                        position-secs: root.video-position-secs;
+                        duration-secs: root.video-duration-secs;
+                        position-text: root.video-position-text;
+                        duration-text: root.video-duration-text;
+                        playing: root.video-playing;
+                        speed-text: root.video-speed-text;
+                        volume: root.video-volume;
+                        muted: root.video-muted;
+                        subtitles-visible: root.video-subtitles-visible;
+                        has-subtitles: root.video-has-subtitles;
+                        fullscreen: false;
+                        controls-visible: root.video-controls-visible;
+                        error-text: root.video-error;
+                        can-prev: root.can-go-prev;
+                        can-next: root.can-go-next;
+                        toggle-play => { root.video-toggle-play(); }
+                        seek-to(v) => { root.video-seek-to(v); }
+                        cycle-speed => { root.video-cycle-speed(); }
+                        set-volume(v) => { root.video-set-volume(v); }
+                        toggle-mute => { root.video-toggle-mute(); }
+                        prev-file => { root.video-prev-file(); }
+                        next-file => { root.video-next-file(); }
+                        toggle-subtitles => { root.video-toggle-subtitles(); }
+                        toggle-fullscreen => { root.video-toggle-fullscreen(); }
+                        activity => { root.video-activity(); }
+                        hover-controls(h) => { root.video-hover-controls(h); }
+                        area-resized(w, h) => { root.video-area-resized(w, h); }
+                    }
+
+                    // 3. 已探测媒体视图（图像 / 视频 / 音频 / 文本占位面板）
+                    if root.active-viewer == "audio" : HorizontalLayout {
+                        alignment: center;
+
+                        AudioViewerPanel {
+                            dark-mode: root.dark-mode;
+                            track-title: root.audio-title;
+                            artist: root.audio-artist;
+                            album: root.audio-album;
+                            format-text: root.audio-format;
+                            cover: root.audio-cover;
+                            has-cover: root.audio-has-cover;
+                            position-secs: root.audio-position-secs;
+                            duration-secs: root.audio-duration-secs;
+                            position-text: root.audio-position-text;
+                            duration-text: root.audio-duration-text;
+                            playing: root.audio-playing;
+                            speed-text: root.audio-speed-text;
+                            volume: root.audio-volume;
+                            muted: root.audio-muted;
+                            auto-next: root.audio-auto-next;
+                            error-text: root.audio-error;
+                            can-prev: root.can-go-prev;
+                            can-next: root.can-go-next;
+                            toggle-play => { root.audio-toggle-play(); }
+                            seek-to(v) => { root.audio-seek-to(v); }
+                            cycle-speed => { root.audio-cycle-speed(); }
+                            set-volume(v) => { root.audio-set-volume(v); }
+                            toggle-mute => { root.audio-toggle-mute(); }
+                            prev-track => { root.audio-prev-track(); }
+                            next-track => { root.audio-next-track(); }
+                            toggle-auto-next => { root.audio-toggle-auto-next(); }
+                        }
+                    }
+
+                    // 3. 已探测媒体视图（图像 / 视频 / 文本占位面板）
+                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" && root.active-viewer != "audio" && root.active-viewer != "text" && root.active-viewer != "video" && root.active-viewer != "image" : HorizontalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            preferred-width: 560px;
+                            min-width: 380px;
+                            max-width: 560px;
+                            border-radius: 18px;
+                            border-width: 1.5px;
+                            border-color: root.dark-mode ? #2C3038 : #D9DEE7;
+                            background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+                            VerticalLayout {
+                                padding: 28px;
+                                spacing: 10px;
+
+                                Text {
+                                    text: root.current-file-name;
+                                    font-size: 20px;
+                                    font-weight: 700;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #F3F5F8 : #15181E;
+                                }
+
+                                Text {
+                                    text: Tr.current-viewer-prefix + root.active-viewer + "   •   " + Tr.recognized-prefix + root.detected-format;
+                                    font-size: 13px;
+                                    color: root.dark-mode ? #7EA6F8 : #2563EB;
+                                }
+
+                                Text {
+                                    text: root.current-file-path;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 底部极简提示条
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 16px;
+                    opacity: root.active-viewer == "image" && !ImageState.chrome-visible && root.toast-text == "" ? 0.0 : 1.0;
+                    animate opacity { duration: root.reduced-motion ? 0ms : 260ms; easing: ease-out; }
+
+                    Text {
+                        text: root.toast-text != "" ? root.toast-text : (root.active-viewer == "welcome" ? root.recent-hint : Tr.hint-siblings);
+                        font-size: 12px;
+                        color: root.toast-text != "" ? #2563EB : (root.dark-mode ? #7B8394 : #7A8496);
+                    }
+
+                    Text {
+                        text: "•";
+                        font-size: 12px;
+                        color: root.dark-mode ? #4E5563 : #BCC4D1;
+                    }
+
+                    Text {
+                        text: Tr.render-prefix + root.renderer-label + (root.reduced-motion ? Tr.reduced-motion-suffix : "");
+                        font-size: 12px;
+                        color: root.dark-mode ? #7B8394 : #7A8496;
+                    }
+
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.settings-clicked(); }
+                        Text {
+                            text: "⚙ " + Tr.settings;
+                            font-size: 12px;
+                            color: parent.has-hover ? #2563EB : (root.dark-mode ? #9DA5B4 : #5A6475);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.active-viewer == "video" && root.video-fullscreen : VideoViewerPanel {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        frame: root.video-frame;
+        has-frame: root.video-has-frame;
+        position-secs: root.video-position-secs;
+        duration-secs: root.video-duration-secs;
+        position-text: root.video-position-text;
+        duration-text: root.video-duration-text;
+        playing: root.video-playing;
+        speed-text: root.video-speed-text;
+        volume: root.video-volume;
+        muted: root.video-muted;
+        subtitles-visible: root.video-subtitles-visible;
+        has-subtitles: root.video-has-subtitles;
+        fullscreen: true;
+        controls-visible: root.video-controls-visible;
+        error-text: root.video-error;
+        can-prev: root.can-go-prev;
+        can-next: root.can-go-next;
+        toggle-play => { root.video-toggle-play(); }
+        seek-to(v) => { root.video-seek-to(v); }
+        cycle-speed => { root.video-cycle-speed(); }
+        set-volume(v) => { root.video-set-volume(v); }
+        toggle-mute => { root.video-toggle-mute(); }
+        prev-file => { root.video-prev-file(); }
+        next-file => { root.video-next-file(); }
+        toggle-subtitles => { root.video-toggle-subtitles(); }
+        toggle-fullscreen => { root.video-toggle-fullscreen(); }
+        activity => { root.video-activity(); }
+        hover-controls(h) => { root.video-hover-controls(h); }
+        area-resized(w, h) => { root.video-area-resized(w, h); }
+    }
+
+    if root.settings-open : SettingsOverlay {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        dark-mode: root.dark-mode;
+        theme-index: root.theme-index;
+        language-index: root.language-index;
+        auto-save: root.auto-save;
+        recent-enabled: root.recent-enabled;
+        version-text: root.version-text;
+        storage-text: root.storage-text;
+        update-text: root.update-text;
+        update-available: root.update-available;
+        checking: root.update-checking;
+        close => { root.settings-closed(); }
+        theme-selected(i) => { root.theme-selected(i); }
+        language-selected(i) => { root.language-selected(i); }
+        auto-save-toggled => { root.auto-save-toggled(); }
+        recent-toggled => { root.recent-toggled(); }
+        clear-recent => { root.clear-recent-clicked(); }
+        check-update => { root.check-update-clicked(); }
+        open-release-page => { root.open-release-page-clicked(); }
+        open-default-apps => { root.open-default-apps-clicked(); }
+    }
+}

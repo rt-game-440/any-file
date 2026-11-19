@@ -1,0 +1,399 @@
+// 文本编辑态视图（工单 #11）：编辑区、工具栏、查找替换条与未保存 / 冲突决策对话框。
+// 状态与回调集中在全局 EditorState，由 Rust 侧 src/editor_glue.rs 绑定，
+// 避免在 app.slint 中逐项转发属性。
+
+import { TextEdit } from "std-widgets.slint";
+import { Tr } from "i18n.slint";
+
+export global EditorState {
+    // 是否处于编辑态（为真时显示编辑视图并隐藏查看态）
+    in-out property <bool> active: false;
+    // 编辑缓冲区全文：与 TextEdit 双向绑定，Rust 侧在撤销 / 替换 / 重载时回写
+    in-out property <string> text: "";
+    // 自动保存开关：由 Rust 从全局配置同步，切换经 autosave-toggle 回调写回配置
+    in property <bool> autosave: false;
+    in property <bool> dark-mode: false;
+    in property <length> font-size: 14px;
+    in property <bool> dirty: false;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <string> meta: "";
+    in property <string> status: "";
+    in property <string> find-status: "";
+    // 查找命中后要选中的字节区间；sel-tick 递增触发
+    in property <int> sel-start: 0;
+    in property <int> sel-end: 0;
+    in property <int> sel-tick: 0;
+    // 对话框：0 无 / 1 未保存 / 2 外部修改冲突 / 3 编码不可表示 / 4 无写入权限
+    in-out property <int> dialog: 0;
+    in property <string> dialog-title: "";
+    in property <string> dialog-text: "";
+    in property <string> dialog-b1: "";
+    in property <string> dialog-b2: "";
+    in property <string> dialog-b3: "";
+
+    callback begin();
+    callback autosave-toggle();
+    callback edited(string);
+    callback undo();
+    callback redo();
+    callback save();
+    callback save-as();
+    callback exit-request();
+    callback find-changed(string, bool);
+    callback find-next(string, bool);
+    callback find-prev(string, bool);
+    callback replace-one(string, string, bool);
+    callback replace-all(string, string, bool);
+    // 对话框按钮：1/2/3 为主/次/第三按钮，0 为取消
+    callback dialog-action(int);
+}
+
+component EditorButton inherits TouchArea {
+    in property <string> label;
+    in property <bool> dark-mode: false;
+    in property <bool> enabled-state: true;
+    in property <bool> primary: false;
+    width: max(40px, label-text.preferred-width + 20px);
+    mouse-cursor: root.enabled-state ? pointer : default;
+    Rectangle {
+        border-radius: 6px;
+        opacity: root.enabled-state ? 1.0 : 0.45;
+        background: root.primary
+            ? (parent.has-hover ? #2F6FE0 : #2563EB)
+            : (parent.has-hover
+                ? (root.dark-mode ? #303541 : #DDE3EC)
+                : (root.dark-mode ? #282C35 : #FFFFFF));
+        border-width: 1px;
+        border-color: root.primary ? #2563EB : (root.dark-mode ? #3A404C : #CBD3DF);
+        label-text := Text {
+            text: root.label;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.primary ? #FFFFFF : (root.dark-mode ? #E2E6EE : #1E2430);
+        }
+    }
+}
+
+component FieldBox inherits Rectangle {
+    in property <bool> dark-mode: false;
+    horizontal-stretch: 1;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.dark-mode ? #3A404C : #CBD3DF;
+    background: root.dark-mode ? #14161B : #FFFFFF;
+}
+
+export component TextEditorView inherits Rectangle {
+    in property <bool> dark-mode: EditorState.dark-mode;
+    in property <int> focus-tick: 0;
+
+    property <bool> find-open: false;
+    property <bool> case-sensitive: false;
+
+    background: root.dark-mode ? #1B1D23 : #FFFFFF;
+    clip: true;
+
+    changed focus-tick => { edit.focus(); }
+
+    property <bool> active: EditorState.active;
+    property <int> sel-tick: EditorState.sel-tick;
+
+    changed active => {
+        if (root.active) {
+            edit.focus();
+        }
+    }
+
+    changed sel-tick => {
+        edit.set-selection-offsets(EditorState.sel-start, EditorState.sel-end);
+        edit.focus();
+    }
+
+    function do-save() {
+        EditorState.save();
+    }
+
+    VerticalLayout {
+        // 工具栏
+        Rectangle {
+            height: 40px;
+            background: root.dark-mode ? #23262E : #EEF1F6;
+            HorizontalLayout {
+                padding: 6px;
+                spacing: 6px;
+                EditorButton {
+                    label: EditorState.dirty ? Tr.editor-save-dirty : Tr.editor-save;
+                    primary: EditorState.dirty;
+                    dark-mode: root.dark-mode;
+                    clicked => { root.do-save(); }
+                }
+                EditorButton {
+                    label: Tr.editor-save-as;
+                    dark-mode: root.dark-mode;
+                    clicked => { EditorState.save-as(); }
+                }
+                EditorButton {
+                    label: Tr.editor-undo;
+                    enabled-state: EditorState.can-undo;
+                    dark-mode: root.dark-mode;
+                    clicked => { if (EditorState.can-undo) { EditorState.undo(); } }
+                }
+                EditorButton {
+                    label: Tr.editor-redo;
+                    enabled-state: EditorState.can-redo;
+                    dark-mode: root.dark-mode;
+                    clicked => { if (EditorState.can-redo) { EditorState.redo(); } }
+                }
+                EditorButton {
+                    label: Tr.editor-find-replace;
+                    dark-mode: root.dark-mode;
+                    clicked => {
+                        root.find-open = !root.find-open;
+                        if (root.find-open) { find-input.focus(); } else { edit.focus(); }
+                    }
+                }
+                EditorButton {
+                    label: EditorState.autosave ? Tr.editor-autosave-on : Tr.editor-autosave;
+                    dark-mode: root.dark-mode;
+                    clicked => { EditorState.autosave-toggle(); }
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: EditorState.meta;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    horizontal-alignment: right;
+                    overflow: elide;
+                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                }
+                EditorButton {
+                    label: Tr.editor-exit;
+                    dark-mode: root.dark-mode;
+                    clicked => { EditorState.exit-request(); }
+                }
+            }
+        }
+
+        // 查找 / 替换条
+        Rectangle {
+            height: root.find-open ? 74px : 0px;
+            visible: root.find-open;
+            clip: true;
+            background: root.dark-mode ? #23262E : #EEF1F6;
+            VerticalLayout {
+                padding: 6px;
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    FieldBox {
+                        dark-mode: root.dark-mode;
+                        find-input := TextInput {
+                            x: 8px;
+                            width: parent.width - 16px;
+                            font-size: 13px;
+                            color: root.dark-mode ? #E2E6EE : #1E2430;
+                            edited => { EditorState.find-changed(self.text, root.case-sensitive); }
+                            accepted => { EditorState.find-next(self.text, root.case-sensitive); }
+                            key-pressed(event) => {
+                                if (event.text == Key.Escape) {
+                                    root.find-open = false;
+                                    edit.focus();
+                                    return accept;
+                                }
+                                if (event.text == Key.Return && event.modifiers.shift) {
+                                    EditorState.find-prev(self.text, root.case-sensitive);
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                        }
+                    }
+                    Text {
+                        text: EditorState.find-status;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        color: root.dark-mode ? #9DA5B4 : #5A6475;
+                    }
+                    EditorButton {
+                        label: root.case-sensitive ? "Aa ✓" : "Aa";
+                        dark-mode: root.dark-mode;
+                        clicked => {
+                            root.case-sensitive = !root.case-sensitive;
+                            EditorState.find-changed(find-input.text, root.case-sensitive);
+                        }
+                    }
+                    EditorButton {
+                        label: "↑";
+                        dark-mode: root.dark-mode;
+                        clicked => { EditorState.find-prev(find-input.text, root.case-sensitive); }
+                    }
+                    EditorButton {
+                        label: "↓";
+                        dark-mode: root.dark-mode;
+                        clicked => { EditorState.find-next(find-input.text, root.case-sensitive); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    FieldBox {
+                        dark-mode: root.dark-mode;
+                        replace-input := TextInput {
+                            x: 8px;
+                            width: parent.width - 16px;
+                            font-size: 13px;
+                            color: root.dark-mode ? #E2E6EE : #1E2430;
+                            accepted => {
+                                EditorState.replace-one(find-input.text, self.text, root.case-sensitive);
+                            }
+                            key-pressed(event) => {
+                                if (event.text == Key.Escape) {
+                                    root.find-open = false;
+                                    edit.focus();
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                        }
+                    }
+                    EditorButton {
+                        label: Tr.editor-replace;
+                        dark-mode: root.dark-mode;
+                        clicked => {
+                            EditorState.replace-one(find-input.text, replace-input.text, root.case-sensitive);
+                        }
+                    }
+                    EditorButton {
+                        label: Tr.editor-replace-all;
+                        dark-mode: root.dark-mode;
+                        clicked => {
+                            EditorState.replace-all(find-input.text, replace-input.text, root.case-sensitive);
+                        }
+                    }
+                }
+            }
+        }
+
+        if EditorState.status != "" : Rectangle {
+            height: 28px;
+            background: root.dark-mode ? #3A2F14 : #FFF4D6;
+            Text {
+                x: 12px;
+                width: parent.width - 24px;
+                text: EditorState.status;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+                color: root.dark-mode ? #F1D58A : #7A5A00;
+            }
+        }
+
+        // 编辑区：撤销 / 重做 / 保存 / 查找等快捷键在子项处理前截获，使用自有撤销栈
+        FocusScope {
+            vertical-stretch: 1;
+            capture-key-pressed(event) => {
+                if (event.modifiers.control) {
+                    if (event.text == "z" || event.text == "\u{1a}") {
+                        if (event.modifiers.shift) { EditorState.redo(); } else { EditorState.undo(); }
+                        return accept;
+                    }
+                    if (event.text == "y" || event.text == "\u{19}") {
+                        EditorState.redo();
+                        return accept;
+                    }
+                    if (event.text == "s" || event.text == "\u{13}") {
+                        if (event.modifiers.shift) { EditorState.save-as(); } else { root.do-save(); }
+                        return accept;
+                    }
+                    if (event.text == "f" || event.text == "\u{6}" || event.text == "h" || event.text == "\u{8}") {
+                        root.find-open = true;
+                        find-input.focus();
+                        return accept;
+                    }
+                    if (event.text == "e" || event.text == "\u{5}") {
+                        EditorState.exit-request();
+                        return accept;
+                    }
+                }
+                if (event.text == Key.Escape) {
+                    EditorState.exit-request();
+                    return accept;
+                }
+                if (event.text == Key.F3) {
+                    if (event.modifiers.shift) {
+                        EditorState.find-prev(find-input.text, root.case-sensitive);
+                    } else {
+                        EditorState.find-next(find-input.text, root.case-sensitive);
+                    }
+                    return accept;
+                }
+                return reject;
+            }
+
+            edit := TextEdit {
+                width: 100%;
+                height: 100%;
+                font-size: EditorState.font-size;
+                wrap: no-wrap;
+                text <=> EditorState.text;
+                edited(t) => { EditorState.edited(t); }
+            }
+        }
+    }
+
+    // 模态决策对话框
+    if EditorState.dialog != 0 : Rectangle {
+        background: #00000088;
+        TouchArea { }
+        Rectangle {
+            width: min(460px, parent.width - 40px);
+            height: dialog-col.preferred-height + 32px;
+            border-radius: 10px;
+            background: root.dark-mode ? #23262E : #FFFFFF;
+            border-width: 1px;
+            border-color: root.dark-mode ? #3A404C : #CBD3DF;
+            dialog-col := VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+                Text {
+                    text: EditorState.dialog-title;
+                    font-size: 15px;
+                    font-weight: 700;
+                    color: root.dark-mode ? #F2F4F8 : #1E2430;
+                }
+                Text {
+                    text: EditorState.dialog-text;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    color: root.dark-mode ? #C5CBD8 : #3A4352;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+                    EditorButton {
+                        label: Tr.editor-cancel;
+                        dark-mode: root.dark-mode;
+                        clicked => { EditorState.dialog-action(0); }
+                    }
+                    if EditorState.dialog-b3 != "" : EditorButton {
+                        label: EditorState.dialog-b3;
+                        dark-mode: root.dark-mode;
+                        clicked => { EditorState.dialog-action(3); }
+                    }
+                    if EditorState.dialog-b2 != "" : EditorButton {
+                        label: EditorState.dialog-b2;
+                        dark-mode: root.dark-mode;
+                        clicked => { EditorState.dialog-action(2); }
+                    }
+                    EditorButton {
+                        label: EditorState.dialog-b1;
+                        primary: true;
+                        dark-mode: root.dark-mode;
+                        clicked => { EditorState.dialog-action(1); }
+                    }
+                }
+            }
+        }
+    }
+}

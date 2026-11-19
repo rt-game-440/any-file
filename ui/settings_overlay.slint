@@ -1,0 +1,162 @@
+// 设置 / 关于浮层：主题、语言、自动保存、最近记录、检查更新、默认应用跳转。
+// 纯展示组件：状态由 Rust 注入，操作通过回调上抛；文案来自 Tr 全局对象。
+
+import { Tr } from "i18n.slint";
+
+component SBtn inherits TouchArea {
+    in property <string> label;
+    in property <bool> dark-mode: false;
+    in property <bool> active: false;
+    height: 30px;
+    mouse-cursor: pointer;
+
+    Rectangle {
+        border-radius: 7px;
+        border-width: 1px;
+        border-color: root.active ? #2563EB : (root.dark-mode ? #343944 : #D6DCE6);
+        background: root.active ? #2563EB : (root.has-hover ? (root.dark-mode ? #252A34 : #E7ECF3) : (root.dark-mode ? #1E2129 : #FFFFFF));
+        Text {
+            text: root.label;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.active ? #FFFFFF : (root.dark-mode ? #E2E6EE : #1E2430);
+        }
+    }
+}
+
+component SwitchRow inherits TouchArea {
+    in property <string> label;
+    in property <bool> checked;
+    in property <bool> dark-mode: false;
+    height: 28px;
+    mouse-cursor: pointer;
+
+    HorizontalLayout {
+        spacing: 10px;
+        Rectangle {
+            width: 34px;
+            height: 18px;
+            y: 5px;
+            border-radius: 9px;
+            background: root.checked ? #2563EB : (root.dark-mode ? #3A4050 : #C5CCD9);
+            Rectangle {
+                width: 14px;
+                height: 14px;
+                y: 2px;
+                x: root.checked ? 18px : 2px;
+                border-radius: 7px;
+                background: #FFFFFF;
+            }
+        }
+        Text {
+            text: root.label;
+            font-size: 13px;
+            vertical-alignment: center;
+            color: root.dark-mode ? #E2E6EE : #1E2430;
+        }
+    }
+}
+
+export component SettingsOverlay inherits Rectangle {
+    in property <bool> dark-mode: false;
+    in property <int> theme-index: 0;
+    in property <int> language-index: 0;
+    in property <bool> auto-save: false;
+    in property <bool> recent-enabled: true;
+    in property <string> version-text: "";
+    in property <string> storage-text: "";
+    in property <string> update-text: "";
+    in property <bool> update-available: false;
+    in property <bool> checking: false;
+
+    callback close();
+    callback theme-selected(int);
+    callback language-selected(int);
+    callback auto-save-toggled();
+    callback recent-toggled();
+    callback clear-recent();
+    callback check-update();
+    callback open-release-page();
+    callback open-default-apps();
+
+    background: #00000088;
+
+    // 吞掉点击，避免穿透到下层；点击遮罩关闭
+    TouchArea {
+        clicked => { root.close(); }
+    }
+
+    Rectangle {
+        width: min(460px, parent.width - 32px);
+        height: min(parent.height - 32px, 470px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: root.dark-mode ? #343944 : #D6DCE6;
+        background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+        TouchArea { }
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 10px;
+
+            HorizontalLayout {
+                Text {
+                    text: Tr.settings;
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: root.dark-mode ? #F3F5F8 : #15181E;
+                }
+                SBtn {
+                    width: 64px;
+                    label: Tr.close;
+                    dark-mode: root.dark-mode;
+                    clicked => { root.close(); }
+                }
+            }
+
+            Text { text: Tr.theme; font-size: 12px; color: root.dark-mode ? #9DA5B4 : #5A6475; }
+            HorizontalLayout {
+                spacing: 6px;
+                SBtn { label: Tr.theme-system; dark-mode: root.dark-mode; active: root.theme-index == 0; clicked => { root.theme-selected(0); } }
+                SBtn { label: Tr.theme-light; dark-mode: root.dark-mode; active: root.theme-index == 1; clicked => { root.theme-selected(1); } }
+                SBtn { label: Tr.theme-dark; dark-mode: root.dark-mode; active: root.theme-index == 2; clicked => { root.theme-selected(2); } }
+            }
+
+            Text { text: Tr.language; font-size: 12px; color: root.dark-mode ? #9DA5B4 : #5A6475; }
+            HorizontalLayout {
+                spacing: 6px;
+                SBtn { label: Tr.lang-system; dark-mode: root.dark-mode; active: root.language-index == 0; clicked => { root.language-selected(0); } }
+                SBtn { label: Tr.lang-zh; dark-mode: root.dark-mode; active: root.language-index == 1; clicked => { root.language-selected(1); } }
+                SBtn { label: Tr.lang-en; dark-mode: root.dark-mode; active: root.language-index == 2; clicked => { root.language-selected(2); } }
+            }
+
+            SwitchRow { label: Tr.auto-save; checked: root.auto-save; dark-mode: root.dark-mode; clicked => { root.auto-save-toggled(); } }
+            SwitchRow { label: Tr.keep-recent; checked: root.recent-enabled; dark-mode: root.dark-mode; clicked => { root.recent-toggled(); } }
+
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                SBtn { label: Tr.clear-recent; width: 140px; dark-mode: root.dark-mode; clicked => { root.clear-recent(); } }
+                SBtn { label: root.checking ? Tr.checking : Tr.check-update; width: 120px; dark-mode: root.dark-mode; clicked => { root.check-update(); } }
+                if root.update-available : SBtn { label: Tr.open-release-page; width: 120px; dark-mode: root.dark-mode; active: true; clicked => { root.open-release-page(); } }
+            }
+            if root.update-text != "" : Text {
+                text: root.update-text;
+                font-size: 12px;
+                wrap: word-wrap;
+                color: root.dark-mode ? #7EA6F8 : #2563EB;
+            }
+
+            SBtn { label: Tr.default-apps; dark-mode: root.dark-mode; clicked => { root.open-default-apps(); } }
+
+            Rectangle { height: 1px; background: root.dark-mode ? #2C3038 : #E6EAF0; }
+            Text { text: Tr.about; font-size: 12px; font-weight: 600; color: root.dark-mode ? #9DA5B4 : #5A6475; }
+            Text { text: "AnyFile  " + root.version-text + "  ·  " + root.storage-text; font-size: 12px; color: root.dark-mode ? #E2E6EE : #1E2430; }
+            Text { text: Tr.privacy-note; font-size: 11px; wrap: word-wrap; color: root.dark-mode ? #7B8394 : #7A8496; }
+        }
+    }
+}

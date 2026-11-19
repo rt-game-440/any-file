@@ -1,0 +1,27 @@
+# Rust 构建产物
+/target/
+**/*.rs.bk
+
+# 日志与调试输出
+/logs/
+*.log
+
+# 基准测试与临时产物
+/benchmarks/output/
+/third_party/libmpv/*.dll
+/third_party/libmpv/*.7z
+/third_party/libmpv/*.a
+/third_party/libmpv/*.lib
+/third_party/libmpv/include/
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.iml
+
+/dist/
