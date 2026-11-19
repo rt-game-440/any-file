@@ -1,0 +1,237 @@
+// 文本查看态视图（工单 #10）：行号、语法着色、页内查找条、Ctrl+滚轮缩放与状态栏
+
+import { ListView } from "std-widgets.slint";
+
+component ActionButton inherits TouchArea {
+    in property <string> label;
+    in property <bool> dark-mode: false;
+    width: 40px;
+    mouse-cursor: pointer;
+    Rectangle {
+        border-radius: 6px;
+        background: parent.has-hover
+            ? (root.dark-mode ? #303541 : #DDE3EC)
+            : (root.dark-mode ? #282C35 : #FFFFFF);
+        border-width: 1px;
+        border-color: root.dark-mode ? #3A404C : #CBD3DF;
+        Text {
+            text: root.label;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.dark-mode ? #E2E6EE : #1E2430;
+        }
+    }
+}
+
+export struct TextSegment {
+    text: string,
+    kind: int,
+    highlight: int,
+}
+
+export struct TextRow {
+    number: int,
+    segments: [TextSegment],
+}
+
+export component TextViewer inherits Rectangle {
+    in property <[TextRow]> rows;
+    in property <bool> dark-mode: false;
+    in property <length> font-size: 14px;
+    in property <string> meta-text: "";
+    in property <string> notice-text: "";
+    in property <string> find-status: "";
+    in property <int> gutter-digits: 3;
+    in-out property <bool> find-open: false;
+    in-out property <bool> case-sensitive: false;
+    in-out property <string> find-query: "";
+
+    callback find-changed(string, bool);
+    callback find-next();
+    callback find-prev();
+    callback find-closed();
+    callback zoom-wheel(float);
+
+    property <length> row-height: root.font-size * 1.55;
+    property <length> gutter-width: root.font-size * 0.62 * (root.gutter-digits + 2);
+
+    in property <int> focus-find-tick: 0;
+    changed focus-find-tick => {
+        root.find-open = true;
+        find-input.focus();
+    }
+
+    function kind-color(kind: int) -> color {
+        if (kind == 1) { return root.dark-mode ? #C586C0 : #AF00DB; }
+        if (kind == 2) { return root.dark-mode ? #CE9178 : #A31515; }
+        if (kind == 3) { return root.dark-mode ? #6A9955 : #008000; }
+        if (kind == 4) { return root.dark-mode ? #B5CEA8 : #098658; }
+        if (kind == 5) { return root.dark-mode ? #9CDCFE : #0451A5; }
+        if (kind == 6) { return root.dark-mode ? #569CD6 : #800000; }
+        if (kind == 7) { return root.dark-mode ? #4FC1FF : #0B5CAD; }
+        if (kind == 8) { return root.dark-mode ? #4EC9B0 : #267F99; }
+        return root.dark-mode ? #D4D4D4 : #1E2430;
+    }
+
+    background: root.dark-mode ? #1B1D23 : #FFFFFF;
+    clip: true;
+
+    VerticalLayout {
+        Rectangle {
+            height: root.find-open ? 40px : 0px;
+            visible: root.find-open;
+            clip: true;
+            background: root.dark-mode ? #23262E : #EEF1F6;
+            HorizontalLayout {
+                padding: 6px;
+                spacing: 8px;
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: root.dark-mode ? #3A404C : #CBD3DF;
+                    background: root.dark-mode ? #14161B : #FFFFFF;
+                    find-input := TextInput {
+                        x: 8px;
+                        width: parent.width - 16px;
+                        font-size: 13px;
+                        color: root.dark-mode ? #E2E6EE : #1E2430;
+                        text <=> root.find-query;
+                        edited => {
+                            root.find-changed(self.text, root.case-sensitive);
+                        }
+                        accepted => {
+                            root.find-next();
+                        }
+                        key-pressed(event) => {
+                            if (event.text == Key.Escape) {
+                                root.find-open = false;
+                                root.find-closed();
+                                return accept;
+                            }
+                            if (event.text == Key.Return && event.modifiers.shift) {
+                                root.find-prev();
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+                }
+                Text {
+                    text: root.find-status;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                }
+                ActionButton {
+                    label: root.case-sensitive ? "Aa ✓" : "Aa";
+                    dark-mode: root.dark-mode;
+                    clicked => {
+                        root.case-sensitive = !root.case-sensitive;
+                        root.find-changed(root.find-query, root.case-sensitive);
+                    }
+                }
+                ActionButton {
+                    label: "↑";
+                    dark-mode: root.dark-mode;
+                    clicked => { root.find-prev(); }
+                }
+                ActionButton {
+                    label: "↓";
+                    dark-mode: root.dark-mode;
+                    clicked => { root.find-next(); }
+                }
+                ActionButton {
+                    label: "✕";
+                    dark-mode: root.dark-mode;
+                    clicked => {
+                        root.find-open = false;
+                        root.find-closed();
+                    }
+                }
+            }
+        }
+
+        if root.notice-text != "" : Rectangle {
+            height: 28px;
+            background: root.dark-mode ? #3A2F14 : #FFF4D6;
+            Text {
+                x: 12px;
+                width: parent.width - 24px;
+                text: root.notice-text;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+                color: root.dark-mode ? #F1D58A : #7A5A00;
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            list := ListView {
+                for row[idx] in root.rows : Rectangle {
+                    height: root.row-height;
+                    Rectangle {
+                        x: 0px;
+                        width: root.gutter-width;
+                        background: root.dark-mode ? #1F2128 : #F3F5F8;
+                        Text {
+                            width: parent.width - 8px;
+                            text: row.number;
+                            font-size: root.font-size * 0.9;
+                            font-family: "Consolas";
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            color: root.dark-mode ? #6B7385 : #9AA3B5;
+                        }
+                    }
+                    HorizontalLayout {
+                        x: root.gutter-width + 10px;
+                        spacing: 0px;
+                        alignment: start;
+                        for seg in row.segments : Rectangle {
+                            background: seg.highlight == 2
+                                ? #F59E0B88
+                                : seg.highlight == 1 ? #FDE04788 : transparent;
+                            Text {
+                                text: seg.text;
+                                font-size: root.font-size;
+                                font-family: "Consolas";
+                                vertical-alignment: center;
+                                color: root.kind-color(seg.kind);
+                            }
+                            width: self.preferred-width;
+                        }
+                    }
+                }
+            }
+
+            // Ctrl+滚轮缩放：非 Ctrl 滚轮事件不拦截，交给 ListView 正常滚动
+            TouchArea {
+                scroll-event(event) => {
+                    if (event.modifiers.control) {
+                        root.zoom-wheel(event.delta-y / 1px);
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 26px;
+            background: root.dark-mode ? #20232A : #EEF1F6;
+            Text {
+                x: 12px;
+                width: parent.width - 24px;
+                text: root.meta-text;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+                color: root.dark-mode ? #9DA5B4 : #5A6475;
+            }
+        }
+    }
+}
+

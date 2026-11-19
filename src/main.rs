@@ -172,6 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
+    wire_text_view(&window, &session);
     {
         let session = Arc::clone(&session);
         window.on_open_with_other_app_clicked(move || {
@@ -346,6 +347,8 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
     };
     window.set_switch_viewer_label(switch_label.into());
 
+    sync_text_view(window, session);
+
     if let Some(fallback) = session.fallback_info() {
         window.set_fallback_size_text(fallback.formatted_size().into());
         window.set_fallback_reason(fallback.reason_message.into());
@@ -370,6 +373,108 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
         window.set_current_file_name("".into());
         window.set_current_file_path("".into());
         window.set_status_subtitle("拖放任意文件到此处，或点击下方按钮打开".into());
+    }
+}
+
+/// 同步文本查看态（行模型、字号、状态栏、查找状态）到窗口。
+fn sync_text_view(window: &MainWindow, session: &AppSession) {
+    use anyfile::text_viewer::ui_model::TextLinesModel;
+    use slint::ModelRc;
+
+    window.set_text_font_size(session.text_font_size());
+    let Some(doc) = session.text_viewer() else {
+        window.set_text_rows(ModelRc::default());
+        window.set_text_meta("".into());
+        window.set_text_notice("".into());
+        return;
+    };
+    let find = session.text_find_state();
+    window.set_text_find_status(find.status_text().into());
+    window.set_text_gutter_digits(doc.lines.len().max(1).to_string().len() as i32);
+    window.set_text_rows(ModelRc::new(TextLinesModel::new(doc.clone(), &find)));
+    let m = &doc.meta;
+    window.set_text_meta(
+        format!(
+            "{} · {} · {} 行 · {} · 字号 {:.0}px",
+            m.encoding.label(),
+            m.line_ending.label(),
+            doc.lines.len(),
+            m.syntax.label(),
+            session.text_font_size()
+        )
+        .into(),
+    );
+    let notice = if m.is_large_file_readonly {
+        format!(
+            "大文件只读保护（{:.1} MB）：仅预览前 2 MB，已禁用编辑",
+            m.file_size as f64 / 1_048_576.0
+        )
+    } else {
+        String::new()
+    };
+    window.set_text_notice(notice.into());
+}
+
+fn wire_text_view(window: &MainWindow, session: &Arc<AppSession>) {
+    {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        window.on_text_find_changed(move |q, case| {
+            session.text_find(q.as_str(), case);
+            if let Some(win) = weak.upgrade() {
+                sync_text_view(&win, &session);
+            }
+        });
+    }
+    for next in [true, false] {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        let cb = move || {
+            if next {
+                session.text_find_next();
+            } else {
+                session.text_find_prev();
+            }
+            if let Some(win) = weak.upgrade() {
+                sync_text_view(&win, &session);
+            }
+        };
+        if next {
+            window.on_text_find_next(cb);
+        } else {
+            window.on_text_find_prev(cb);
+        }
+    }
+    {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        window.on_text_find_closed(move || {
+            session.text_find_clear();
+            if let Some(win) = weak.upgrade() {
+                sync_text_view(&win, &session);
+            }
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        window.on_text_zoom_wheel(move |d| {
+            session.text_zoom_by_wheel(d, true);
+            if let Some(win) = weak.upgrade() {
+                win.set_text_font_size(session.text_font_size());
+                sync_text_view(&win, &session);
+            }
+        });
+    }
+    {
+        let session = Arc::clone(session);
+        let weak = window.as_weak();
+        window.on_text_zoom_reset(move || {
+            session.text_zoom_reset();
+            if let Some(win) = weak.upgrade() {
+                sync_text_view(&win, &session);
+            }
+        });
     }
 }
 

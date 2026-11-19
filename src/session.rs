@@ -13,6 +13,9 @@ use crate::motion::{MotionChannel, MotionEngine, MotionSnapshot};
 use crate::ports::{Clock, SystemShell, VideoBackend};
 use crate::probing;
 use crate::sibling::{self, DirectoryWatcher};
+use crate::text_viewer::{
+    self, DEFAULT_FONT_SIZE, FindMatch, TextDocument, TextFindState, find_in_document,
+};
 
 /// `AppSession` 内部快照状态
 #[derive(Debug, Clone)]
@@ -26,6 +29,10 @@ struct SessionState {
     /// 当前同目录序列的同类筛选锚点大类（切过损坏文件时保留原大类上下文）
     sibling_filter_category: Option<MediaCategory>,
     text_mode: TextMode,
+    /// 当前文本文档（仅文本查看器激活时加载）
+    text_document: Option<Arc<TextDocument>>,
+    text_find: TextFindState,
+    text_font_size: f32,
     has_unsaved_changes: bool,
     theme_preference: ThemePreference,
     resolved_theme: ResolvedTheme,
@@ -80,6 +87,9 @@ impl AppSession {
                 sibling_sequence: SiblingSequence::empty(),
                 sibling_filter_category: None,
                 text_mode: TextMode::Viewing,
+                text_document: None,
+                text_find: TextFindState::default(),
+                text_font_size: DEFAULT_FONT_SIZE,
                 has_unsaved_changes: false,
                 theme_preference: ThemePreference::System,
                 resolved_theme,
@@ -125,6 +135,76 @@ impl AppSession {
     /// 获取当前文本模式（查看态 / 编辑态）
     pub fn text_mode(&self) -> TextMode {
         self.state.read().unwrap().text_mode
+    }
+
+    /// 获取当前文本文档（仅文本查看器激活或曾切到文本时存在）
+    pub fn text_viewer(&self) -> Option<Arc<TextDocument>> {
+        self.state.read().unwrap().text_document.clone()
+    }
+
+    fn load_text_document(path: &Path) -> Option<Arc<TextDocument>> {
+        TextDocument::load(path).ok().map(Arc::new)
+    }
+
+    /// 当前文本是否处于大文件只读保护（编辑态应据此禁用一键编辑）
+    pub fn text_is_readonly_protected(&self) -> bool {
+        self.state
+            .read()
+            .unwrap()
+            .text_document
+            .as_ref()
+            .is_some_and(|d| d.meta.is_large_file_readonly)
+    }
+
+    /// 页内查找（Ctrl+F）：设置查询并跳到第一个匹配；空查询清除高亮。
+    pub fn text_find(&self, query: &str, case_sensitive: bool) -> TextFindState {
+        let mut guard = self.state.write().unwrap();
+        let state = match guard.text_document.as_ref() {
+            Some(doc) => find_in_document(doc, query, case_sensitive),
+            None => TextFindState::default(),
+        };
+        guard.text_find = state.clone();
+        state
+    }
+
+    /// 跳到下一个匹配（循环），返回该匹配
+    pub fn text_find_next(&self) -> Option<FindMatch> {
+        self.state.write().unwrap().text_find.next_match()
+    }
+
+    /// 跳到上一个匹配（循环），返回该匹配
+    pub fn text_find_prev(&self) -> Option<FindMatch> {
+        self.state.write().unwrap().text_find.prev_match()
+    }
+
+    /// 当前页内查找状态快照
+    pub fn text_find_state(&self) -> TextFindState {
+        self.state.read().unwrap().text_find.clone()
+    }
+
+    /// 关闭查找并清除高亮
+    pub fn text_find_clear(&self) {
+        self.state.write().unwrap().text_find = TextFindState::default();
+    }
+
+    /// 当前文本字号（px）
+    pub fn text_font_size(&self) -> f32 {
+        self.state.read().unwrap().text_font_size
+    }
+
+    /// Ctrl+滚轮缩放字号：未按 Ctrl 不变；返回新字号
+    pub fn text_zoom_by_wheel(&self, delta_y: f32, ctrl_pressed: bool) -> f32 {
+        let mut guard = self.state.write().unwrap();
+        guard.text_font_size =
+            text_viewer::zoom_for_wheel(guard.text_font_size, delta_y, ctrl_pressed);
+        guard.text_font_size
+    }
+
+    /// 重置字号为默认值
+    pub fn text_zoom_reset(&self) -> f32 {
+        let mut guard = self.state.write().unwrap();
+        guard.text_font_size = DEFAULT_FONT_SIZE;
+        guard.text_font_size
     }
 
     /// 获取当前解析后的深浅色主题
@@ -250,14 +330,22 @@ impl AppSession {
             return Err("无法手动切换到欢迎空态".to_string());
         }
 
-        let mut guard = self.state.write().unwrap();
-        if guard.current_file.is_none() {
-            return Err("当前未打开任何文件项".to_string());
-        }
+        let path = {
+            let guard = self.state.read().unwrap();
+            guard
+                .current_file
+                .as_ref()
+                .map(|e| e.path.clone())
+                .ok_or_else(|| "当前未打开任何文件项".to_string())?
+        };
+        let loaded = (target == ViewerKind::Text).then(|| Self::load_text_document(&path));
 
+        let mut guard = self.state.write().unwrap();
         guard.active_viewer = target;
-        if target == ViewerKind::Text {
+        if let Some(doc) = loaded {
             guard.text_mode = TextMode::Viewing;
+            guard.text_document = doc;
+            guard.text_find = TextFindState::default();
         }
         if !guard.available_viewers.contains(&target) {
             guard.available_viewers.push(target);
@@ -457,8 +545,15 @@ impl AppSession {
         };
 
         let sequence = sibling::build_sibling_sequence(&entry, filter_by_category, filter_cat);
+        let text_document = if viewer == ViewerKind::Text {
+            Self::load_text_document(path)
+        } else {
+            None
+        };
 
         let mut guard = self.state.write().unwrap();
+        guard.text_document = text_document;
+        guard.text_find = TextFindState::default();
         guard.current_file = Some(entry.clone());
         guard.active_viewer = viewer;
         guard.detected_format = probe.detected_format;
