@@ -6,6 +6,7 @@ pub mod fixtures;
 pub mod platform;
 pub mod ports;
 pub mod session;
+pub mod video;
 
 slint::include_modules!();
 

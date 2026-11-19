@@ -21,6 +21,7 @@ slint = { version = "1.19.0", default-features = false, features = [
     "std",
     "backend-winit",
     "renderer-skia",
+    "renderer-skia-opengl",
     "renderer-software",
     "accessibility",
     "compat-1-2",
@@ -29,6 +30,7 @@ slint = { version = "1.19.0", default-features = false, features = [
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
+    "Win32_System_LibraryLoader",
     "Win32_System_Registry",
     "Win32_UI_WindowsAndMessaging",
 ] }
