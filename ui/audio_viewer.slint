@@ -1,3 +1,5 @@
+import { Tr } from "i18n.slint";
+
 // 音频视图（Audio Viewer）播放卡片：封面、元数据、可拖拽进度条、倍速、音量与连播开关。
 // 纯展示组件：状态由 Rust 侧（src/audio_viewer）通过属性注入，用户操作通过回调上抛。
 
@@ -230,20 +232,20 @@ export component AudioViewerPanel inherits Rectangle {
             alignment: center;
 
             AudioButton {
-                label: "上一首";
+                label: Tr.audio-prev;
                 dark-mode: root.dark-mode;
                 enabled-state: root.can-prev;
                 clicked => { root.prev-track(); }
             }
             AudioButton {
-                label: root.playing ? "暂停" : "播放";
+                label: root.playing ? Tr.audio-pause : Tr.audio-play;
                 dark-mode: root.dark-mode;
                 primary: true;
                 min-width: 88px;
                 clicked => { root.toggle-play(); }
             }
             AudioButton {
-                label: "下一首";
+                label: Tr.audio-next;
                 dark-mode: root.dark-mode;
                 enabled-state: root.can-next;
                 clicked => { root.next-track(); }
@@ -256,12 +258,12 @@ export component AudioViewerPanel inherits Rectangle {
             alignment: center;
 
             AudioButton {
-                label: "倍速 " + root.speed-text;
+                label: Tr.audio-speed-prefix + root.speed-text;
                 dark-mode: root.dark-mode;
                 clicked => { root.cycle-speed(); }
             }
             AudioButton {
-                label: root.muted ? "取消静音" : "静音";
+                label: root.muted ? Tr.audio-unmute : Tr.audio-mute;
                 dark-mode: root.dark-mode;
                 active: root.muted;
                 clicked => { root.toggle-mute(); }
@@ -298,7 +300,7 @@ export component AudioViewerPanel inherits Rectangle {
                 }
             }
             AudioButton {
-                label: "自动播放下一首";
+                label: Tr.audio-auto-next;
                 dark-mode: root.dark-mode;
                 active: root.auto-next;
                 clicked => { root.toggle-auto-next(); }
@@ -313,7 +315,7 @@ export component AudioViewerPanel inherits Rectangle {
         }
 
         Text {
-            text: "Space 播放/暂停 · ←/→ 快退/快进 5 秒 · PageUp/PageDown 或 Ctrl+←/→ 切歌 · M 静音";
+            text: Tr.audio-hint;
             font-size: 11px;
             wrap: word-wrap;
             horizontal-alignment: center;

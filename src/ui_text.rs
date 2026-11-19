@@ -1,0 +1,73 @@
+//! 将 `UiStrings` 整体写入 Slint `Tr` 全局对象（切换语言即时生效）。
+
+use slint::ComponentHandle;
+
+use crate::i18n::UiStrings;
+use crate::{MainWindow, Tr};
+
+pub fn apply_ui_strings(window: &MainWindow, s: &UiStrings) {
+    let tr = window.global::<Tr>();
+    tr.set_welcome_subtitle(s.welcome_subtitle.as_str().into());
+    tr.set_opened_prefix(s.opened_prefix.as_str().into());
+    tr.set_unnamed_file(s.unnamed_file.as_str().into());
+    tr.set_open_file(s.open_file.as_str().into());
+    tr.set_prev_item(s.prev_item.as_str().into());
+    tr.set_next_item(s.next_item.as_str().into());
+    tr.set_filter_same_kind(s.filter_same_kind.as_str().into());
+    tr.set_filter_all(s.filter_all.as_str().into());
+    tr.set_open_as_text(s.open_as_text.as_str().into());
+    tr.set_switch_viewer(s.switch_viewer.as_str().into());
+    tr.set_unsupported_title(s.unsupported_title.as_str().into());
+    tr.set_path_prefix(s.path_prefix.as_str().into());
+    tr.set_size_prefix(s.size_prefix.as_str().into());
+    tr.set_detected_prefix(s.detected_prefix.as_str().into());
+    tr.set_current_viewer_prefix(s.current_viewer_prefix.as_str().into());
+    tr.set_recognized_prefix(s.recognized_prefix.as_str().into());
+    tr.set_open_with_other_app(s.open_with_other_app.as_str().into());
+    tr.set_recent_title(s.recent_title.as_str().into());
+    tr.set_recent_none(s.recent_none.as_str().into());
+    tr.set_recent_off(s.recent_off.as_str().into());
+    tr.set_hint_siblings(s.hint_siblings.as_str().into());
+    tr.set_render_prefix(s.render_prefix.as_str().into());
+    tr.set_reduced_motion_suffix(s.reduced_motion_suffix.as_str().into());
+    tr.set_audio_prev(s.audio_prev.as_str().into());
+    tr.set_audio_play(s.audio_play.as_str().into());
+    tr.set_audio_pause(s.audio_pause.as_str().into());
+    tr.set_audio_next(s.audio_next.as_str().into());
+    tr.set_audio_speed_prefix(s.audio_speed_prefix.as_str().into());
+    tr.set_audio_unmute(s.audio_unmute.as_str().into());
+    tr.set_audio_mute(s.audio_mute.as_str().into());
+    tr.set_audio_auto_next(s.audio_auto_next.as_str().into());
+    tr.set_audio_hint(s.audio_hint.as_str().into());
+    tr.set_op_delete(s.op_delete.as_str().into());
+    tr.set_op_copy_path(s.op_copy_path.as_str().into());
+    tr.set_op_reveal(s.op_reveal.as_str().into());
+    tr.set_toast_deleted(s.toast_deleted.as_str().into());
+    tr.set_toast_copied(s.toast_copied.as_str().into());
+    tr.set_toast_failed_prefix(s.toast_failed_prefix.as_str().into());
+    tr.set_settings(s.settings.as_str().into());
+    tr.set_close(s.close.as_str().into());
+    tr.set_theme(s.theme.as_str().into());
+    tr.set_theme_system(s.theme_system.as_str().into());
+    tr.set_theme_light(s.theme_light.as_str().into());
+    tr.set_theme_dark(s.theme_dark.as_str().into());
+    tr.set_language(s.language.as_str().into());
+    tr.set_lang_system(s.lang_system.as_str().into());
+    tr.set_lang_zh(s.lang_zh.as_str().into());
+    tr.set_lang_en(s.lang_en.as_str().into());
+    tr.set_auto_save(s.auto_save.as_str().into());
+    tr.set_keep_recent(s.keep_recent.as_str().into());
+    tr.set_clear_recent(s.clear_recent.as_str().into());
+    tr.set_check_update(s.check_update.as_str().into());
+    tr.set_checking(s.checking.as_str().into());
+    tr.set_open_release_page(s.open_release_page.as_str().into());
+    tr.set_default_apps(s.default_apps.as_str().into());
+    tr.set_about(s.about.as_str().into());
+    tr.set_version_prefix(s.version_prefix.as_str().into());
+    tr.set_storage_portable(s.storage_portable.as_str().into());
+    tr.set_storage_installed(s.storage_installed.as_str().into());
+    tr.set_privacy_note(s.privacy_note.as_str().into());
+    tr.set_update_up_to_date(s.update_up_to_date.as_str().into());
+    tr.set_update_available_prefix(s.update_available_prefix.as_str().into());
+    tr.set_update_failed_prefix(s.update_failed_prefix.as_str().into());
+}
