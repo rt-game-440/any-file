@@ -93,3 +93,21 @@ fn shell_audio_text_messages_are_fully_english() {
     assert!(!has_cjk(&large_file_notice(Language::En, 12.3)));
     assert!(has_cjk(&text_meta_line(Language::ZhCn, "UTF-8", "LF", 3, "日志", 14.0)));
 }
+
+#[test]
+fn editor_messages_are_fully_english() {
+    for m in [
+        "存在未保存的修改",
+        "当前不是文本视图",
+        "当前不在编辑态",
+        "大文件只读保护：已禁用编辑",
+        "文件含有无法无损解码的字节，已禁用编辑以防数据损坏",
+        "无法写入临时文件：x",
+        "保存：没有写入权限（x）",
+        "文件为只读属性",
+        "无法替换目标文件",
+    ] {
+        let en = localize(m, Language::En);
+        assert!(!has_cjk(&en), "英文残留中文：{en}（原文 {m}）");
+    }
+}

@@ -16,6 +16,7 @@ pub mod ui_text;
 pub mod update_check;
 pub mod video;
 pub mod sibling;
+pub mod text_editor;
 pub mod text_viewer;
 pub mod window_shell;
 

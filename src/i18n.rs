@@ -147,10 +147,65 @@ ui_strings! {
     update_up_to_date: "已是最新版本", "You're up to date";
     update_available_prefix: "发现新版本：", "New version available: ";
     update_failed_prefix: "检查失败：", "Check failed: ";
+    editor_begin: "编辑 Ctrl+E", "Edit Ctrl+E";
+    editor_save: "保存", "Save";
+    editor_save_dirty: "保存 ●", "Save ●";
+    editor_save_as: "另存为", "Save as";
+    editor_undo: "撤销", "Undo";
+    editor_redo: "重做", "Redo";
+    editor_find_replace: "查找替换", "Find/Replace";
+    editor_autosave: "自动保存", "Auto-save";
+    editor_autosave_on: "自动保存 ✓", "Auto-save ✓";
+    editor_exit: "退出编辑 Esc", "Exit editing Esc";
+    editor_replace: "替换", "Replace";
+    editor_replace_all: "全部替换", "Replace all";
+    editor_cancel: "取消", "Cancel";
+    editor_mixed_eol_note: "（混合换行将统一保存）", " (mixed line endings will be normalized on save)";
+    dlg_conflict_mod_title: "文件已被外部修改", "File modified externally";
+    dlg_conflict_mod_text: "磁盘上的文件在你编辑期间被其他程序修改。直接保存会覆盖对方的改动。", "The file on disk was changed by another program while you were editing. Saving now will overwrite those changes.";
+    dlg_overwrite: "覆盖保存", "Overwrite";
+    dlg_conflict_del_title: "文件已被删除或移动", "File deleted or moved";
+    dlg_conflict_del_text: "原文件已不存在。可以重新创建并保存，或另存为其他位置。", "The original file no longer exists. Recreate and save it, or save elsewhere.";
+    dlg_recreate: "重新创建并保存", "Recreate and save";
+    dlg_reload: "重新载入", "Reload";
+    dlg_save_as: "另存为…", "Save as…";
+    dlg_unrep_title: "存在无法用原编码表示的字符", "Characters cannot be represented in the original encoding";
+    dlg_to_utf8: "转为 UTF-8 保存", "Convert to UTF-8 and save";
+    dlg_noperm_title: "没有写入权限", "No write permission";
+    dlg_noperm_suffix: "。AnyFile 不会提升权限，请另存到有权限的位置。", ". AnyFile will not elevate privileges; please save to a location you can write to.";
+    dlg_unsaved_title: "有未保存的修改", "Unsaved changes";
+    dlg_unsaved_close: "关闭窗口前", "Before closing the window, ";
+    dlg_unsaved_exit: "退出编辑前", "Before leaving edit mode, ";
+    dlg_unsaved_continue: "继续之前", "Before continuing, ";
+    dlg_unsaved_question: "是否保存对该文件的修改？", "do you want to save your changes to this file?";
+    dlg_save: "保存", "Save";
+    dlg_discard: "不保存", "Don't save";
+    status_save_failed_prefix: "保存失败：", "Save failed: ";
+    status_reload_failed_prefix: "重新载入失败：", "Reload failed: ";
+    status_ext_modified: "磁盘文件已被外部修改：保存时将询问如何处理", "File changed on disk: you will be asked how to proceed when saving";
+    status_ext_deleted: "磁盘文件已被删除或移动：保存时将询问如何处理", "File deleted or moved on disk: you will be asked how to proceed when saving";
+    status_autosave_conflict: "自动保存已暂停：磁盘文件发生外部变化", "Auto-save paused: the file changed on disk";
+    status_autosave_unrep: "自动保存已暂停：含原编码无法表示的字符，请手动保存", "Auto-save paused: contains characters the original encoding cannot represent; save manually";
+    status_autosave_failed_prefix: "自动保存失败：", "Auto-save failed: ";
+    find_none: "无匹配", "No matches";
+    find_matches_suffix: " 处匹配", " matches";
+    replaced_prefix: "已替换 ", "Replaced ";
+    replaced_suffix: " 处", " occurrence(s)";
+    unrep_message_fmt: "第 {line} 行含有 {enc} 无法表示的字符「{sample}」，是否转为 UTF-8 保存？", "Line {line} contains characters {enc} cannot represent: \"{sample}\". Convert to UTF-8 and save?";
+    file_filter_all: "所有文件 (*.*)", "All files (*.*)";
 }
 
 /// 中文固定短语 -> 英文；长短语在前（按顺序匹配替换）。
 const PHRASES: &[(&str, &str)] = &[
+    ("存在未保存的修改", "There are unsaved changes"),
+    ("当前不是文本视图", "Not in the text view"),
+    ("当前不在编辑态", "Not in edit mode"),
+    ("大文件只读保护：已禁用编辑", "Large file is read-only: editing disabled"),
+    ("文件含有无法无损解码的字节，已禁用编辑以防数据损坏", "The file contains bytes that cannot be decoded losslessly; editing disabled to prevent data corruption"),
+    ("没有写入权限", "No write permission"),
+    ("文件为只读属性", "The file is read-only"),
+    ("无法写入临时文件", "Cannot write temporary file"),
+    ("无法替换目标文件", "Cannot replace target file"),
     ("文件扩展名为 .", "File extension is ."),
     ("，但文件头特征缺失或已损坏", ", but the file header signature is missing or damaged"),
     ("，但文件头无效或内容已损坏，无法安全解码。", ", but the header is invalid or the content is damaged and cannot be decoded safely."),
