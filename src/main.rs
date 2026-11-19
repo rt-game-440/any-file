@@ -337,7 +337,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             CloseDecision::AllowExit => {
                 with_audio(|a| a.stop());
                 video_glue::stop();
-                CloseRequestResponse::HideWindow
+                // 关闭即退出进程（ADR-0002）：绕过事件循环收尾与 thread_local 析构顺序问题，
+                // 否则 Windows 下会以 0xC0000409（thread local panicked on drop）中止。
+                fast_exit();
             }
             CloseDecision::ConfirmUnsavedChanges => CloseRequestResponse::KeepWindowShown,
         }
@@ -402,7 +404,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     slint::run_event_loop()?;
-    Ok(())
+    // 事件循环结束即彻底退出（ADR-0002）：直接结束进程，跳过 thread_local（Timer 等）析构，
+    // 否则 Slint 平台 TLS 先于这些 Timer 销毁，会触发 "thread local panicked on drop" 中止（退出码 0xC0000409）。
+    fast_exit();
 }
 
 thread_local! {
@@ -990,4 +994,15 @@ fn wire_settings_and_ops(
             let _ = shell.open_default_apps_settings();
         });
     }
+}
+
+/// 立即结束进程（ADR-0002 关闭即退出）：Windows 下直接 TerminateProcess，
+/// 绕过 Rust/Slint thread_local 析构顺序问题（否则以 0xC0000409 中止）。
+fn fast_exit() -> ! {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        TerminateProcess(GetCurrentProcess(), 0);
+    }
+    std::process::exit(0)
 }
