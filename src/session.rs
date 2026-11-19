@@ -13,6 +13,11 @@ use crate::motion::{MotionChannel, MotionEngine, MotionSnapshot};
 use crate::ports::{Clock, SystemShell, VideoBackend};
 use crate::probing;
 use crate::sibling::{self, DirectoryWatcher};
+mod editing;
+
+pub use editing::{PendingAction, UNSAVED_CHANGES_ERROR, UnsavedDecision};
+
+use crate::text_editor::TextEditor;
 use crate::text_viewer::{
     self, DEFAULT_FONT_SIZE, FindMatch, TextDocument, TextFindState, find_in_document,
 };
@@ -49,6 +54,12 @@ pub struct AppSession {
     video_backend: Arc<dyn VideoBackend>,
     state: Arc<RwLock<SessionState>>,
     watcher: Mutex<Option<DirectoryWatcher>>,
+    /// 文本编辑态缓冲区（工单 #11）；`Some` 即处于 Editing Mode
+    editor: Mutex<Option<TextEditor>>,
+    /// 因未保存修改而被拦截、等待用户决策的动作
+    pending: Mutex<Option<PendingAction>>,
+    /// 用户已确认退出（保存或放弃后），UI 层据此真正关闭窗口
+    exit_approved: std::sync::atomic::AtomicBool,
 }
 
 impl AppSession {
@@ -99,6 +110,9 @@ impl AppSession {
                 started_at,
             })),
             watcher: Mutex::new(None),
+            editor: Mutex::new(None),
+            pending: Mutex::new(None),
+            exit_approved: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -311,6 +325,7 @@ impl AppSession {
 
     /// 打开指定路径的文件项：执行 Magic Bytes / 流信息 / 编码懒探测，并按扩展名构建同目录序列（ADR-0006）。
     pub fn open_file(&self, path: &Path) -> Result<FileEntry, String> {
+        self.guard_unsaved(PendingAction::OpenFile(path.to_path_buf()))?;
         self.open_file_internal(path, false)
     }
 
@@ -329,6 +344,10 @@ impl AppSession {
         if target == ViewerKind::Welcome {
             return Err("无法手动切换到欢迎空态".to_string());
         }
+        if target == ViewerKind::Text && self.text_edit_active() {
+            return Ok(target);
+        }
+        self.guard_unsaved(PendingAction::SwitchViewer(target))?;
 
         let path = {
             let guard = self.state.read().unwrap();
@@ -342,6 +361,10 @@ impl AppSession {
 
         let mut guard = self.state.write().unwrap();
         guard.active_viewer = target;
+        if target != ViewerKind::Text {
+            *self.editor.lock().unwrap() = None;
+            guard.text_mode = TextMode::Viewing;
+        }
         if let Some(doc) = loaded {
             guard.text_mode = TextMode::Viewing;
             guard.text_document = doc;
@@ -391,6 +414,7 @@ impl AppSession {
 
     /// 切换到同目录序列中的上一项（到达开头时返回 `Ok(None)`，不越界）。
     pub fn navigate_prev(&self) -> Result<Option<FileEntry>, String> {
+        self.guard_unsaved(PendingAction::NavigatePrev)?;
         let target = {
             let guard = self.state.read().unwrap();
             let seq = &guard.sibling_sequence;
@@ -408,6 +432,7 @@ impl AppSession {
 
     /// 切换到同目录序列中的下一项（到达末尾时返回 `Ok(None)`，不越界）。
     pub fn navigate_next(&self) -> Result<Option<FileEntry>, String> {
+        self.guard_unsaved(PendingAction::NavigateNext)?;
         let target = {
             let guard = self.state.read().unwrap();
             let seq = &guard.sibling_sequence;
@@ -563,6 +588,7 @@ impl AppSession {
         guard.sibling_sequence = sequence;
         guard.text_mode = TextMode::Viewing;
         guard.has_unsaved_changes = false;
+        *self.editor.lock().unwrap() = None;
         if !guard.motion_engine.has_active_animations() {
             guard.last_motion_tick = now;
         }
@@ -581,8 +607,8 @@ impl AppSession {
 
     /// 请求关闭窗口：无未保存修改时立即允许退出（遵循 ADR-0002，零后台驻留）。
     pub fn request_close(&self) -> CloseDecision {
-        let guard = self.state.read().unwrap();
-        if guard.has_unsaved_changes {
+        if self.text_edit_dirty() {
+            *self.pending.lock().unwrap() = Some(PendingAction::CloseWindow);
             CloseDecision::ConfirmUnsavedChanges
         } else {
             CloseDecision::AllowExit

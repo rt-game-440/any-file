@@ -5,6 +5,8 @@
     windows_subsystem = "windows"
 )]
 
+mod editor_glue;
+
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -175,6 +177,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     wire_text_view(&window, &session);
+    let _editor_timers = {
+        let weak = window.as_weak();
+        let session_for_sync = Arc::clone(&session);
+        let resync: Rc<dyn Fn()> = Rc::new(move || {
+            if let Some(win) = weak.upgrade() {
+                sync_session_to_window(&win, &session_for_sync, renderer_label);
+            }
+        });
+        editor_glue::wire(&window, &session, resync)
+    };
     {
         let session = Arc::clone(&session);
         window.on_open_with_other_app_clicked(move || {
@@ -527,6 +539,7 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
         window.set_status_subtitle("拖放任意文件到此处，或点击下方按钮打开".into());
     }
     sync_audio_to_window(window, session);
+    editor_glue::sync_state(window, session);
 }
 
 /// 同步文本查看态（行模型、字号、状态栏、查找状态）到窗口。

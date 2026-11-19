@@ -2,6 +2,8 @@
 
 import { TextViewer, TextRow, TextSegment } from "text_viewer.slint";
 export { TextRow, TextSegment }
+import { TextEditorView, EditorState } from "text_editor.slint";
+export { EditorState }
 import { AudioViewerPanel } from "audio_viewer.slint";
 
 component ActionPill inherits TouchArea {
@@ -150,7 +152,11 @@ export component MainWindow inherits Window {
         width: 100%;
         height: 100%;
         key-pressed(event) => {
-            if (root.active-viewer == "text" && event.modifiers.control) {
+            if (root.active-viewer == "text" && !EditorState.active && event.modifiers.control) {
+                if (event.text == "e") {
+                    EditorState.begin();
+                    return accept;
+                }
                 if (event.text == "f") {
                     root.find-tick += 1;
                     return accept;
@@ -173,7 +179,7 @@ export component MainWindow inherits Window {
                     return accept;
                 }
             }
-            if (root.active-viewer != "welcome" && root.active-viewer != "audio") {
+            if (root.active-viewer != "welcome" && root.active-viewer != "audio" && !EditorState.active) {
                 if (event.text == Key.LeftArrow && root.can-go-prev) {
                     root.prev-sibling-clicked();
                     return accept;
@@ -401,7 +407,13 @@ export component MainWindow inherits Window {
                             clicked => { root.toggle-filter-clicked(); }
                         }
 
-                        if root.show-switch-viewer : ActionPill {
+                        if root.active-viewer == "text" && !EditorState.active : ActionPill {
+                            label: "编辑 Ctrl+E";
+                            dark-mode: root.dark-mode;
+                            clicked => { EditorState.begin(); }
+                        }
+
+                        if root.show-switch-viewer && !EditorState.active : ActionPill {
                             label: root.switch-viewer-label;
                             dark-mode: root.dark-mode;
                             clicked => { root.switch-viewer-clicked(); }
@@ -414,7 +426,11 @@ export component MainWindow inherits Window {
                     vertical-stretch: 1;
                     alignment: root.active-viewer == "text" ? stretch : center;
 
-                    if root.active-viewer == "text" : TextViewer {
+                    if root.active-viewer == "text" && EditorState.active : TextEditorView {
+                        vertical-stretch: 1;
+                    }
+
+                    if root.active-viewer == "text" && !EditorState.active : TextViewer {
                         focus-find-tick: root.find-tick;
                         scroll-line: root.text-scroll-line;
                         scroll-tick: root.text-scroll-tick;
