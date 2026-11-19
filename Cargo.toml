@@ -1,0 +1,45 @@
+[package]
+name = "anyfile"
+version = "0.1.0"
+edition = "2024"
+description = "面向 Windows 平台的轻量、冷启动极快的开源多用途文件查看器"
+license = "GPL-3.0-or-later"
+readme = "GLOSSARY.md"
+repository = "https://github.com/rt-game-440/any-file"
+build = "build.rs"
+
+[lib]
+name = "anyfile"
+path = "src/lib.rs"
+
+[[bin]]
+name = "anyfile"
+path = "src/main.rs"
+
+[dependencies]
+slint = { version = "1.19.0", default-features = false, features = [
+    "std",
+    "backend-winit",
+    "renderer-skia",
+    "renderer-software",
+    "accessibility",
+    "compat-1-2",
+] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+slint-build = "1.19.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

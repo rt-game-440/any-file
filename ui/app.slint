@@ -1,0 +1,121 @@
+// AnyFile 空态欢迎/拖放窗口骨架（工单 #2）
+
+export component MainWindow inherits Window {
+    in property <bool> dark-mode: false;
+    in property <string> app-title: "AnyFile";
+    in property <string> status-subtitle: "拖放任意文件到此处，或点击下方按钮打开";
+    in property <string> renderer-label: "Skia";
+    in property <bool> reduced-motion: false;
+
+    callback open-file-clicked();
+
+    title: root.app-title;
+    preferred-width: 760px;
+    preferred-height: 520px;
+    min-width: 480px;
+    min-height: 360px;
+    background: root.dark-mode ? #141518 : #F6F7F9;
+
+    // 极简欢迎 / 拖放主区域
+    VerticalLayout {
+        padding: 36px;
+        spacing: 20px;
+        alignment: center;
+
+        // 拖放区卡片
+        HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                preferred-width: 520px;
+                min-width: 360px;
+                max-width: 520px;
+                height: 280px;
+                border-radius: 18px;
+                border-width: 1.5px;
+                border-color: root.dark-mode ? #2C3038 : #D9DEE7;
+                background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+                VerticalLayout {
+                    padding: 32px;
+                    spacing: 14px;
+                    alignment: center;
+
+                    Text {
+                        text: "AnyFile";
+                        font-size: 28px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        color: root.dark-mode ? #F3F5F8 : #15181E;
+                    }
+
+                    Text {
+                        text: root.status-subtitle;
+                        font-size: 14px;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                        color: root.dark-mode ? #9DA5B4 : #5A6475;
+                    }
+
+                    HorizontalLayout {
+                        alignment: center;
+                        padding-top: 8px;
+
+                        TouchArea {
+                            width: 156px;
+                            height: 40px;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.open-file-clicked();
+                            }
+
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                border-radius: 10px;
+                                background: parent.pressed
+                                    ? (root.dark-mode ? #2A63C9 : #1D53B8)
+                                    : (parent.has-hover
+                                        ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
+                                        : (root.dark-mode ? #3370E3 : #2563EB));
+
+                                Text {
+                                    text: "打开文件";
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    color: #FFFFFF;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 底部极简提示条（最近查看空态 + 渲染器/主题摘要）
+        HorizontalLayout {
+            alignment: center;
+            spacing: 16px;
+
+            Text {
+                text: "最近查看：暂无记录";
+                font-size: 12px;
+                color: root.dark-mode ? #7B8394 : #7A8496;
+            }
+
+            Text {
+                text: "•";
+                font-size: 12px;
+                color: root.dark-mode ? #4E5563 : #BCC4D1;
+            }
+
+            Text {
+                text: "渲染：" + root.renderer-label + (root.reduced-motion ? "（减弱动态效果）" : "");
+                font-size: 12px;
+                color: root.dark-mode ? #7B8394 : #7A8496;
+            }
+        }
+    }
+}
