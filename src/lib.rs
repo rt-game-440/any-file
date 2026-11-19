@@ -15,6 +15,7 @@ pub mod session;
 pub mod ui_text;
 pub mod update_check;
 pub mod video;
+pub mod video_viewer;
 pub mod sibling;
 pub mod text_editor;
 pub mod text_viewer;

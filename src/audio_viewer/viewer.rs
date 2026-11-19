@@ -8,6 +8,7 @@ use crate::session::AppSession;
 
 use super::controls::{AudioCommand, AudioKey, KeyModifiers, format_speed, format_time, map_key};
 use super::core::PlaybackSnapshot;
+use super::fallback::{AudioFallback, is_fallback_candidate};
 use super::metadata::{AudioMetadata, read_metadata};
 use super::player::AudioPlayer;
 
@@ -31,6 +32,8 @@ pub struct AudioViewer {
     current: Option<PathBuf>,
     metadata: AudioMetadata,
     error: Option<String>,
+    fallback: Option<Box<dyn AudioFallback>>,
+    using_fallback: bool,
 }
 
 impl AudioViewer {
@@ -42,6 +45,25 @@ impl AudioViewer {
             current: None,
             metadata: AudioMetadata::default(),
             error: None,
+            fallback: None,
+            using_fallback: false,
+        }
+    }
+
+    /// 安装回退引擎（纯 Rust 解码不支持的编码交给 libmpv 播放）
+    pub fn set_fallback(&mut self, fallback: Box<dyn AudioFallback>) {
+        self.fallback = Some(fallback);
+    }
+
+    /// 当前曲目是否由回退引擎播放
+    pub fn using_fallback(&self) -> bool {
+        self.using_fallback
+    }
+
+    fn snapshot(&self) -> PlaybackSnapshot {
+        match (&self.fallback, self.using_fallback) {
+            (Some(f), true) => f.snapshot(),
+            _ => self.player.snapshot(),
         }
     }
 
@@ -73,6 +95,10 @@ impl AudioViewer {
     /// 立即停止并释放当前音频输出
     pub fn stop(&mut self) {
         self.player.stop();
+        if let Some(f) = self.fallback.as_mut() {
+            f.stop();
+        }
+        self.using_fallback = false;
         self.current = None;
         self.error = None;
     }
@@ -105,20 +131,57 @@ impl AudioViewer {
 
     fn load(&mut self, path: &Path) {
         self.player.stop();
+        if let Some(f) = self.fallback.as_mut() {
+            f.stop();
+        }
+        self.using_fallback = false;
         self.metadata = read_metadata(path);
         self.current = Some(path.to_path_buf());
-        match self.player.load(path) {
+        let result = self.player.load(path);
+        let result = match result {
+            Err(e) if is_fallback_candidate(&e) && self.fallback.is_some() => {
+                self.load_with_fallback(path, e)
+            }
+            other => other,
+        };
+        match result {
             Ok(info) => {
                 self.error = None;
                 if self.metadata.duration_secs.is_none() {
                     self.metadata.duration_secs = info.duration_secs;
                 }
                 if self.autoplay_on_load {
-                    self.player.play();
+                    if self.using_fallback {
+                        if let Some(f) = self.fallback.as_mut() {
+                            f.play();
+                        }
+                    } else {
+                        self.player.play();
+                    }
                 }
             }
             Err(e) => self.error = Some(e),
         }
+    }
+
+    /// 纯 Rust 解码失败后改用回退引擎；回退也失败时返回原始错误。
+    fn load_with_fallback(
+        &mut self,
+        path: &Path,
+        original: String,
+    ) -> Result<super::decoder::StreamInfo, String> {
+        let Some(f) = self.fallback.as_mut() else {
+            return Err(original);
+        };
+        if f.load(path).is_err() {
+            return Err(original);
+        }
+        self.using_fallback = true;
+        Ok(super::decoder::StreamInfo {
+            sample_rate: 0,
+            channels: 0,
+            duration_secs: Some(f.snapshot().duration_secs).filter(|d| *d > 0.0),
+        })
     }
 
     /// 处理键盘事件；返回是否被音频视图消费
@@ -146,13 +209,16 @@ impl AudioViewer {
                 }
             }
             AudioCommand::ToggleAutoNext => self.auto_next = !self.auto_next,
-            other => self.player.apply(other),
+            other => match (self.fallback.as_mut(), self.using_fallback) {
+                (Some(f), true) => f.apply(other),
+                _ => self.player.apply(other),
+            },
         }
     }
 
     /// 周期轮询：播完且开启自动播放下一首时切到同目录下一项。返回是否切换了曲目。
     pub fn poll(&mut self, session: &AppSession) -> bool {
-        let snap = self.player.snapshot();
+        let snap = self.snapshot();
         // 已是最后一首时 navigate_next 无结果：停在末尾
         if snap.loaded
             && snap.ended
@@ -165,7 +231,7 @@ impl AudioViewer {
     }
 
     pub fn view_state(&self) -> AudioViewState {
-        let snapshot = self.player.snapshot();
+        let snapshot = self.snapshot();
         AudioViewState {
             position_text: format_time(snapshot.position_secs),
             duration_text: format_time(snapshot.duration_secs),

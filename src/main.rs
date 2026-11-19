@@ -6,6 +6,7 @@
 )]
 
 mod editor_glue;
+mod video_glue;
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -24,7 +25,7 @@ use anyfile::update_check::{CurlReleaseSource, UpdateStatus, check_for_update};
 use anyfile::audio_viewer::{AudioCommand, AudioKey, AudioPlayer, AudioViewer, KeyModifiers};
 use anyfile::domain::{CloseDecision, MotionProfile, ViewerKind};
 use anyfile::motion::{MotionChannel, MotionSnapshot};
-use anyfile::platform::{PlatformSystemShell, SystemClock, UnavailableVideoBackend};
+use anyfile::platform::{PlatformSystemShell, SystemClock};
 use anyfile::session::AppSession;
 use anyfile::{MainWindow, init_slint_backend};
 use slint::{CloseRequestResponse, ComponentHandle, RenderingState, TimerMode};
@@ -70,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. 构建无头应用核心会话 AppSession
     let shell = Arc::new(PlatformSystemShell);
     let clock = Arc::new(SystemClock);
-    let video = Arc::new(UnavailableVideoBackend);
+    let video = video_glue::backend();
     let data_loc = current_data_location();
     diagnostics::init(&data_loc.dir);
     diagnostics::info("AnyFile 启动");
@@ -227,6 +228,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     wire_settings_and_ops(&window, &session, renderer_label, storage_mode);
 
+    // 视频视图（工单 #9）：回调 + 帧/状态定时器
+    let _video_timer = {
+        let weak = window.as_weak();
+        let session_for_sync = Arc::clone(&session);
+        let resync: Rc<dyn Fn()> = Rc::new(move || {
+            if let Some(win) = weak.upgrade() {
+                sync_session_to_window(&win, &session_for_sync, renderer_label);
+            }
+        });
+        video_glue::wire(&window, &session, resync)
+    };
+
     // 音频视图回调（命令 -> AudioViewer；切歌后同步整个窗口状态）
     {
         let session = Arc::clone(&session);
@@ -321,6 +334,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match session_for_close.request_close() {
             CloseDecision::AllowExit => {
                 with_audio(|a| a.stop());
+                video_glue::stop();
                 CloseRequestResponse::HideWindow
             }
             CloseDecision::ConfirmUnsavedChanges => CloseRequestResponse::KeepWindowShown,
@@ -397,7 +411,13 @@ thread_local! {
 fn with_audio<R>(f: impl FnOnce(&mut AudioViewer) -> R) -> R {
     AUDIO.with(|cell| {
         let mut slot = cell.borrow_mut();
-        let viewer = slot.get_or_insert_with(|| AudioViewer::new(AudioPlayer::with_default_device()));
+        let viewer = slot.get_or_insert_with(|| {
+            let mut v = AudioViewer::new(AudioPlayer::with_default_device());
+            v.set_fallback(Box::new(anyfile::video_viewer::MpvAudioFallback::new(
+                video_glue::backend(),
+            )));
+            v
+        });
         f(viewer)
     })
 }
@@ -591,6 +611,7 @@ fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_la
         window.set_status_subtitle(tr.welcome_subtitle.as_str().into());
     }
     sync_audio_to_window(window, session);
+    video_glue::sync_state(window, session);
     editor_glue::sync_state(window, session);
 }
 
