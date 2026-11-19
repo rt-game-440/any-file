@@ -11,6 +11,7 @@ pub mod probing;
 pub mod session;
 pub mod video;
 pub mod sibling;
+pub mod text_viewer;
 pub mod window_shell;
 
 slint::include_modules!();

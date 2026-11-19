@@ -238,6 +238,7 @@ name = "anyfile"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "encoding_rs",
  "image",
  "lofty",
  "notify",
