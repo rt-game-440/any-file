@@ -17,8 +17,23 @@ name = "anyfile"
 path = "src/main.rs"
 
 [dependencies]
+cpal = "0.15"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+lofty = "0.22"
 notify = "8"
 raw-window-handle = "0.6"
+symphonia = { version = "0.5", features = [
+    "aac",
+    "adpcm",
+    "alac",
+    "flac",
+    "isomp4",
+    "mp3",
+    "ogg",
+    "pcm",
+    "vorbis",
+    "wav",
+] }
 slint = { version = "1.19.0", default-features = false, features = [
     "std",
     "backend-winit",

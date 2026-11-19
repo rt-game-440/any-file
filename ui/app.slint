@@ -1,5 +1,7 @@
 // AnyFile 主窗口视图（含无边框自定义标题栏、物理弹簧动效绑定、同目录导航栏、查看器切换入口与兜底信息卡）
 
+import { AudioViewerPanel } from "audio_viewer.slint";
+
 component ActionPill inherits TouchArea {
     in property <string> label;
     in property <bool> dark-mode: false;
@@ -91,6 +93,33 @@ export component MainWindow inherits Window {
     callback open-with-other-app-clicked();
     callback file-dropped(string);
 
+    // 音频视图
+    in property <string> audio-title: "";
+    in property <string> audio-artist: "";
+    in property <string> audio-album: "";
+    in property <string> audio-format: "";
+    in property <image> audio-cover;
+    in property <bool> audio-has-cover: false;
+    in property <float> audio-position-secs: 0;
+    in property <float> audio-duration-secs: 0;
+    in property <string> audio-position-text: "0:00";
+    in property <string> audio-duration-text: "0:00";
+    in property <bool> audio-playing: false;
+    in property <string> audio-speed-text: "1x";
+    in property <float> audio-volume: 1.0;
+    in property <bool> audio-muted: false;
+    in property <bool> audio-auto-next: false;
+    in property <string> audio-error: "";
+    callback audio-key(string, bool) -> bool;
+    callback audio-toggle-play();
+    callback audio-seek-to(float);
+    callback audio-cycle-speed();
+    callback audio-set-volume(float);
+    callback audio-toggle-mute();
+    callback audio-prev-track();
+    callback audio-next-track();
+    callback audio-toggle-auto-next();
+
     no-frame: true;
     title: root.app-title;
     preferred-width: 780px;
@@ -103,7 +132,12 @@ export component MainWindow inherits Window {
         width: 100%;
         height: 100%;
         key-pressed(event) => {
-            if (root.active-viewer != "welcome") {
+            if (root.active-viewer == "audio") {
+                if (root.audio-key(event.text, event.modifiers.control)) {
+                    return accept;
+                }
+            }
+            if (root.active-viewer != "welcome" && root.active-viewer != "audio") {
                 if (event.text == Key.LeftArrow && root.can-go-prev) {
                     root.prev-sibling-clicked();
                     return accept;
@@ -495,7 +529,42 @@ export component MainWindow inherits Window {
                     }
 
                     // 3. 已探测媒体视图（图像 / 视频 / 音频 / 文本占位面板）
-                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" : HorizontalLayout {
+                    if root.active-viewer == "audio" : HorizontalLayout {
+                        alignment: center;
+
+                        AudioViewerPanel {
+                            dark-mode: root.dark-mode;
+                            track-title: root.audio-title;
+                            artist: root.audio-artist;
+                            album: root.audio-album;
+                            format-text: root.audio-format;
+                            cover: root.audio-cover;
+                            has-cover: root.audio-has-cover;
+                            position-secs: root.audio-position-secs;
+                            duration-secs: root.audio-duration-secs;
+                            position-text: root.audio-position-text;
+                            duration-text: root.audio-duration-text;
+                            playing: root.audio-playing;
+                            speed-text: root.audio-speed-text;
+                            volume: root.audio-volume;
+                            muted: root.audio-muted;
+                            auto-next: root.audio-auto-next;
+                            error-text: root.audio-error;
+                            can-prev: root.can-go-prev;
+                            can-next: root.can-go-next;
+                            toggle-play => { root.audio-toggle-play(); }
+                            seek-to(v) => { root.audio-seek-to(v); }
+                            cycle-speed => { root.audio-cycle-speed(); }
+                            set-volume(v) => { root.audio-set-volume(v); }
+                            toggle-mute => { root.audio-toggle-mute(); }
+                            prev-track => { root.audio-prev-track(); }
+                            next-track => { root.audio-next-track(); }
+                            toggle-auto-next => { root.audio-toggle-auto-next(); }
+                        }
+                    }
+
+                    // 3. 已探测媒体视图（图像 / 视频 / 文本占位面板）
+                    if root.active-viewer != "welcome" && root.active-viewer != "unsupported" && root.active-viewer != "audio" : HorizontalLayout {
                         alignment: center;
 
                         Rectangle {

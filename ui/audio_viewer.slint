@@ -1,0 +1,323 @@
+// 音频视图（Audio Viewer）播放卡片：封面、元数据、可拖拽进度条、倍速、音量与连播开关。
+// 纯展示组件：状态由 Rust 侧（src/audio_viewer）通过属性注入，用户操作通过回调上抛。
+
+component AudioButton inherits TouchArea {
+    in property <string> label;
+    in property <bool> dark-mode: false;
+    in property <bool> primary: false;
+    in property <bool> active: false;
+    in property <bool> enabled-state: true;
+
+    height: 34px;
+    min-width: 64px;
+    mouse-cursor: root.enabled-state ? pointer : default;
+    enabled: root.enabled-state;
+
+    Rectangle {
+        border-radius: 17px;
+        border-width: root.primary ? 0px : 1px;
+        border-color: root.dark-mode ? #343944 : #D6DCE6;
+        background: !root.enabled-state
+            ? (root.dark-mode ? #20232A : #ECEFF4)
+            : root.primary
+                ? (root.pressed ? #1D53B8 : (root.has-hover ? #2B6CE6 : #2563EB))
+                : root.active
+                    ? (root.dark-mode ? #28406E : #DCE8FD)
+                    : (root.pressed
+                        ? (root.dark-mode ? #2B303B : #DDE3EC)
+                        : (root.has-hover
+                            ? (root.dark-mode ? #252A34 : #E7ECF3)
+                            : (root.dark-mode ? #1E2129 : #FFFFFF)));
+
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            alignment: center;
+
+            Text {
+                text: root.label;
+                font-size: 13px;
+                font-weight: root.primary ? 600 : 500;
+                vertical-alignment: center;
+                color: !root.enabled-state
+                    ? (root.dark-mode ? #5A6272 : #9BA4B5)
+                    : root.primary
+                        ? #FFFFFF
+                        : (root.dark-mode ? #E2E6EE : #1E2430);
+            }
+        }
+    }
+}
+
+export component AudioViewerPanel inherits Rectangle {
+    in property <bool> dark-mode: false;
+    in property <string> track-title: "";
+    in property <string> artist: "";
+    in property <string> album: "";
+    in property <string> format-text: "";
+    in property <image> cover;
+    in property <bool> has-cover: false;
+    in property <float> position-secs: 0;
+    in property <float> duration-secs: 0;
+    in property <string> position-text: "0:00";
+    in property <string> duration-text: "0:00";
+    in property <bool> playing: false;
+    in property <string> speed-text: "1x";
+    in property <float> volume: 1.0;
+    in property <bool> muted: false;
+    in property <bool> auto-next: false;
+    in property <string> error-text: "";
+    in property <bool> can-prev: false;
+    in property <bool> can-next: false;
+
+    callback toggle-play();
+    callback seek-to(float);
+    callback cycle-speed();
+    callback set-volume(float);
+    callback toggle-mute();
+    callback prev-track();
+    callback next-track();
+    callback toggle-auto-next();
+
+    property <bool> dragging: false;
+    property <float> drag-fraction: 0;
+    property <float> shown-fraction: root.dragging
+        ? root.drag-fraction
+        : (root.duration-secs > 0 ? Math.clamp(root.position-secs / root.duration-secs, 0, 1) : 0);
+
+    preferred-width: 560px;
+    min-width: 380px;
+    max-width: 560px;
+    border-radius: 18px;
+    border-width: 1.5px;
+    border-color: root.dark-mode ? #2C3038 : #D9DEE7;
+    background: root.dark-mode ? #1C1E24 : #FFFFFF;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 14px;
+
+        HorizontalLayout {
+            spacing: 18px;
+
+            Rectangle {
+                width: 120px;
+                height: 120px;
+                border-radius: 14px;
+                clip: true;
+                background: root.dark-mode ? #262A33 : #E8EDF6;
+
+                if root.has-cover : Image {
+                    source: root.cover;
+                    width: parent.width;
+                    height: parent.height;
+                    image-fit: ImageFit.cover;
+                }
+                if !root.has-cover : Text {
+                    text: "♪";
+                    font-size: 56px;
+                    color: root.dark-mode ? #5F6B85 : #9AA8C4;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 6px;
+                alignment: center;
+
+                Text {
+                    text: root.track-title;
+                    font-size: 20px;
+                    font-weight: 700;
+                    overflow: elide;
+                    color: root.dark-mode ? #F3F5F8 : #15181E;
+                }
+                if root.artist != "" : Text {
+                    text: root.artist;
+                    font-size: 14px;
+                    overflow: elide;
+                    color: root.dark-mode ? #B6BDCB : #444C5C;
+                }
+                if root.album != "" : Text {
+                    text: root.album;
+                    font-size: 13px;
+                    overflow: elide;
+                    color: root.dark-mode ? #8A92A3 : #6B7587;
+                }
+                Text {
+                    text: root.format-text;
+                    font-size: 12px;
+                    overflow: elide;
+                    color: root.dark-mode ? #7EA6F8 : #2563EB;
+                }
+            }
+        }
+
+        // 进度条（点击/拖拽跳转，松开时提交）
+        VerticalLayout {
+            spacing: 4px;
+
+            Rectangle {
+                height: 20px;
+
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: root.dark-mode ? #2E333D : #E1E6EF;
+
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * root.shown-fraction;
+                        height: parent.height;
+                        border-radius: 3px;
+                        background: #2563EB;
+                    }
+                }
+
+                Rectangle {
+                    x: parent.width * root.shown-fraction - self.width / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 7px;
+                    background: #2563EB;
+                    border-width: 2px;
+                    border-color: root.dark-mode ? #1C1E24 : #FFFFFF;
+                }
+
+                progress-area := TouchArea {
+                    mouse-cursor: pointer;
+                    pointer-event(e) => {
+                        if (e.button == PointerEventButton.left) {
+                            if (e.kind == PointerEventKind.down) {
+                                root.dragging = true;
+                                root.drag-fraction = Math.clamp(self.mouse-x / self.width, 0, 1);
+                            }
+                            if (e.kind == PointerEventKind.up) {
+                                root.dragging = false;
+                                root.seek-to(Math.clamp(self.mouse-x / self.width, 0, 1) * root.duration-secs);
+                            }
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.drag-fraction = Math.clamp(self.mouse-x / self.width, 0, 1);
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                Text {
+                    text: root.dragging ? "" : root.position-text;
+                    font-size: 12px;
+                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                }
+                Rectangle { }
+                Text {
+                    text: root.duration-text;
+                    font-size: 12px;
+                    color: root.dark-mode ? #9DA5B4 : #5A6475;
+                }
+            }
+        }
+
+        // 主控制行
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: center;
+
+            AudioButton {
+                label: "上一首";
+                dark-mode: root.dark-mode;
+                enabled-state: root.can-prev;
+                clicked => { root.prev-track(); }
+            }
+            AudioButton {
+                label: root.playing ? "暂停" : "播放";
+                dark-mode: root.dark-mode;
+                primary: true;
+                min-width: 88px;
+                clicked => { root.toggle-play(); }
+            }
+            AudioButton {
+                label: "下一首";
+                dark-mode: root.dark-mode;
+                enabled-state: root.can-next;
+                clicked => { root.next-track(); }
+            }
+        }
+
+        // 次要控制行：倍速 / 静音 + 音量 / 自动连播
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: center;
+
+            AudioButton {
+                label: "倍速 " + root.speed-text;
+                dark-mode: root.dark-mode;
+                clicked => { root.cycle-speed(); }
+            }
+            AudioButton {
+                label: root.muted ? "取消静音" : "静音";
+                dark-mode: root.dark-mode;
+                active: root.muted;
+                clicked => { root.toggle-mute(); }
+            }
+            Rectangle {
+                width: 96px;
+                height: 34px;
+
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: root.dark-mode ? #2E333D : #E1E6EF;
+
+                    Rectangle {
+                        width: parent.width * (root.muted ? 0 : root.volume);
+                        height: parent.height;
+                        border-radius: 2px;
+                        background: root.muted ? #8A92A3 : #2563EB;
+                    }
+                }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    pointer-event(e) => {
+                        if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                            root.set-volume(Math.clamp(self.mouse-x / self.width, 0, 1));
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.set-volume(Math.clamp(self.mouse-x / self.width, 0, 1));
+                        }
+                    }
+                }
+            }
+            AudioButton {
+                label: "自动播放下一首";
+                dark-mode: root.dark-mode;
+                active: root.auto-next;
+                clicked => { root.toggle-auto-next(); }
+            }
+        }
+
+        if root.error-text != "" : Text {
+            text: root.error-text;
+            font-size: 12px;
+            wrap: word-wrap;
+            color: #D64545;
+        }
+
+        Text {
+            text: "Space 播放/暂停 · ←/→ 快退/快进 5 秒 · PageUp/PageDown 或 Ctrl+←/→ 切歌 · M 静音";
+            font-size: 11px;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+            color: root.dark-mode ? #6F7787 : #8D96A6;
+        }
+    }
+}
