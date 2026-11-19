@@ -17,6 +17,7 @@ name = "anyfile"
 path = "src/main.rs"
 
 [dependencies]
+notify = "8"
 slint = { version = "1.19.0", default-features = false, features = [
     "std",
     "backend-winit",

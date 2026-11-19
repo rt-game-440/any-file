@@ -5,7 +5,9 @@ pub mod domain;
 pub mod fixtures;
 pub mod platform;
 pub mod ports;
+pub mod probing;
 pub mod session;
+pub mod sibling;
 
 slint::include_modules!();
 
