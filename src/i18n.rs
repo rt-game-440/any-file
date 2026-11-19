@@ -131,7 +131,7 @@ ui_strings! {
     video_loading: "正在载入视频…", "Loading video…";
     audio_hint: "Space 播放/暂停 · ←/→ 快退/快进 5 秒 · PageUp/PageDown 或 Ctrl+←/→ 切歌 · M 静音", "Space play/pause · ←/→ seek 5 s · PageUp/PageDown or Ctrl+←/→ change track · M mute";
     image_fit: "适应窗口", "Fit";
-    image_actual: "1:1", "1:1";
+    image_actual: "原始大小 1:1", "Actual size 1:1";
     image_rotate: "旋转", "Rotate";
     image_copy: "复制图像", "Copy image";
     image_fullscreen: "全屏", "Fullscreen";

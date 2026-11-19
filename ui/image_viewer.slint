@@ -83,29 +83,27 @@ export component ImageViewerPanel inherits Rectangle {
     changed height => { ImageState.viewport-changed(self.width / 1px, self.height / 1px); }
 
     // 图像画布：低清预览层（EXIF 缩略图 / 降采样）+ 完整解码层（渐显替换）
-    Rectangle {
+    if ImageState.has-thumb : Image {
         x: ImageState.img-x;
         y: ImageState.img-y;
         width: ImageState.img-w;
         height: ImageState.img-h;
         rotation-angle: ImageState.angle * 1deg;
-
-        if ImageState.has-thumb : Image {
-            width: 100%;
-            height: 100%;
-            source: ImageState.thumb;
-            image-fit: fill;
-            image-rendering: ImageState.pixelated ? pixelated : smooth;
-        }
-        Image {
-            width: 100%;
-            height: 100%;
-            source: ImageState.full;
-            image-fit: fill;
-            image-rendering: ImageState.pixelated ? pixelated : smooth;
-            opacity: ImageState.full-visible ? 1.0 : 0.0;
-            animate opacity { duration: root.reduced-motion ? 0ms : 220ms; easing: ease-out; }
-        }
+        source: ImageState.thumb;
+        image-fit: fill;
+        image-rendering: ImageState.pixelated ? pixelated : smooth;
+    }
+    Image {
+        x: ImageState.img-x;
+        y: ImageState.img-y;
+        width: ImageState.img-w;
+        height: ImageState.img-h;
+        rotation-angle: ImageState.angle * 1deg;
+        source: ImageState.full;
+        image-fit: fill;
+        image-rendering: ImageState.pixelated ? pixelated : smooth;
+        opacity: ImageState.full-visible ? 1.0 : 0.0;
+        animate opacity { duration: root.reduced-motion ? 0ms : 220ms; easing: ease-out; }
     }
 
     if ImageState.loading && !ImageState.has-thumb && !ImageState.full-visible : Text {

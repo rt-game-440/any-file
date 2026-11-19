@@ -115,11 +115,12 @@ impl ImageTransform {
 
     /// 缩放比例的下限：不小于“适应窗口”的 0.5 倍（过小无意义）且不低于全局下限
     fn min_scale(&self) -> f64 {
-        (self.fit_scale().min(1.0)).max(MIN_ZOOM)
+        self.fit_scale().clamp(MIN_ZOOM, 1.0)
     }
 
     fn max_scale(&self) -> f64 {
-        MAX_ZOOM.min((self.fit_scale() * 64.0).max(16.0))
+        // 显示尺寸上限约 4 万像素，避免渲染器处理超大纹理
+        MAX_ZOOM.min(40000.0 / self.img_w.max(self.img_h)).max(1.0)
     }
 
     /// 以给定缩放比例，在当前旋转下允许的最大平移（半幅）
@@ -190,9 +191,8 @@ impl ImageTransform {
     /// 滚轮缩放：`delta` 为向上为正的滚动量（每格约 120 或 1 单位均可，内部归一）
     pub fn wheel(&mut self, delta: f64, at: (f64, f64), now: f64) {
         self.now = now;
-        let steps = (delta / 120.0).clamp(-8.0, 8.0);
-        let steps = if delta.abs() < 20.0 { delta.signum() * steps.abs().max(0.25) } else { steps };
-        let factor = 1.0015_f64.powf(steps * 120.0 * 0.9);
+        // 指数映射：一格滚轮（约 60~120 单位）约放大 10%~20%，触控板小增量平滑连续
+        let factor = (delta.clamp(-480.0, 480.0) * 0.0016).exp();
         let lo = self.min_scale() * 0.6;
         let hi = self.max_scale() * 1.5;
         self.scale_target = (self.scale_target * factor).clamp(lo, hi);
@@ -376,6 +376,31 @@ impl ImageTransform {
         }
     }
 
+    /// 预览图被完整图替换：保持画面上的视觉尺寸不变（或在适应 / 1:1 模式下重新套用对应比例）
+    pub fn replace_image(&mut self, img_w: u32, img_h: u32) {
+        let (nw, nh) = (f64::from(img_w.max(1)), f64::from(img_h.max(1)));
+        let ratio = self.img_w / nw;
+        self.img_w = nw;
+        self.img_h = nh;
+        match self.mode {
+            FitMode::Fit => {
+                self.scale = self.fit_scale();
+                self.scale_target = self.scale;
+                self.pan = (0.0, 0.0);
+            }
+            FitMode::Actual => {
+                self.scale = 1.0;
+                self.scale_target = 1.0;
+                self.clamp_pan_now();
+            }
+            FitMode::Custom => {
+                self.scale *= ratio;
+                self.scale_target *= ratio;
+                self.clamp_pan_now();
+            }
+        }
+    }
+
     /// 当前显示的像素尺寸（未旋转的图像框，供 UI 设置宽高后再旋转）
     pub fn display_size(&self) -> (f64, f64) {
         (self.img_w * self.scale, self.img_h * self.scale)
@@ -502,6 +527,19 @@ mod tests {
         assert!((t.scale() - 1.0).abs() < 1e-9);
         t.rotate(true);
         assert!((t.angle_deg() - 90.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn replace_image_keeps_visual_size() {
+        let mut t = ImageTransform::new(200, 100, 1000.0, 500.0);
+        t.wheel(120.0, (0.0, 0.0), 0.0);
+        run(&mut t, 1.5);
+        let visual = t.display_size().0;
+        t.replace_image(2000, 1000);
+        assert!((t.display_size().0 - visual).abs() < 1.0);
+        let mut f = ImageTransform::new(200, 100, 1000.0, 500.0);
+        f.replace_image(2000, 1000);
+        assert!((f.display_size().0 - 1000.0).abs() < 1e-6);
     }
 
     #[test]

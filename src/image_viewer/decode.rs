@@ -177,7 +177,7 @@ fn collect_frames(
     for f in frames {
         let f = f.map_err(corrupt)?;
         let (n, d) = f.delay().numer_denom_ms();
-        let mut ms = if d == 0 { 100 } else { n / d };
+        let mut ms = n.checked_div(d).unwrap_or(100);
         if ms < 20 {
             ms = 100;
         }
@@ -312,7 +312,7 @@ fn decode_svg(bytes: &[u8]) -> Result<DecodedImage, DecodeError> {
     );
     let mut data = pixmap.take();
     // tiny-skia 输出预乘 alpha，转回直通 alpha
-    for px in data.chunks_exact_mut(4) {
+    for px in data.as_chunks_mut::<4>().0.iter_mut() {
         let a = u32::from(px[3]);
         if a != 0 && a != 255 {
             for c in &mut px[..3] {
