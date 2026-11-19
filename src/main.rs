@@ -6,15 +6,17 @@
 )]
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use anyfile::domain::CloseDecision;
+use anyfile::domain::{CloseDecision, MotionProfile};
+use anyfile::motion::{MotionChannel, MotionSnapshot};
 use anyfile::platform::{PlatformSystemShell, SystemClock, UnavailableVideoBackend};
 use anyfile::session::AppSession;
 use anyfile::{MainWindow, init_slint_backend};
-use slint::{CloseRequestResponse, ComponentHandle, RenderingState};
+use slint::{CloseRequestResponse, ComponentHandle, RenderingState, TimerMode};
 
 /// 命令行启动参数
 #[derive(Debug, Default)]
@@ -67,6 +69,91 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. 创建并绑定 Slint 主窗口
     let window = MainWindow::new()?;
     sync_session_to_window(&window, &session, active_renderer.display_label());
+    sync_motion_to_window(&window, session.motion_snapshot());
+
+    // 3.1 按需物理弹簧动画帧驱动（仅在存在活跃动画时以 120Hz 节拍推进，收敛后自动停表零空转）
+    let motion_timer = Rc::new(slint::Timer::default());
+    let start_motion_loop = {
+        let motion_timer = Rc::clone(&motion_timer);
+        let session = Arc::clone(&session);
+        let window_weak = window.as_weak();
+        Rc::new(move || {
+            if !session.has_active_animations() {
+                if let Some(win) = window_weak.upgrade() {
+                    sync_motion_to_window(&win, session.motion_snapshot());
+                }
+                motion_timer.stop();
+                return;
+            }
+            if motion_timer.running() {
+                return;
+            }
+            let session_tick = Arc::clone(&session);
+            let window_tick = window_weak.clone();
+            let timer_stop = Rc::clone(&motion_timer);
+            motion_timer.start(TimerMode::Repeated, Duration::from_millis(8), move || {
+                let snapshot = session_tick.tick_motion();
+                if let Some(win) = window_tick.upgrade() {
+                    sync_motion_to_window(&win, snapshot);
+                }
+                if !snapshot.has_active_animations {
+                    timer_stop.stop();
+                }
+            });
+        })
+    };
+
+    // 绑定“打开文件”按钮物理弹性缩放反馈（支持中途打断与减弱动效瞬时降级）
+    {
+        let session_btn = Arc::clone(&session);
+        let start_loop = Rc::clone(&start_motion_loop);
+        window.on_open_button_state_changed(move |hovered, pressed| {
+            let target_scale = if pressed {
+                0.96
+            } else if hovered {
+                1.025
+            } else {
+                1.0
+            };
+            session_btn.animate_channel(
+                MotionChannel::ButtonScale,
+                target_scale,
+                MotionProfile::bouncy(),
+            );
+            start_loop();
+        });
+    }
+
+    // 启动初期若有活跃入场动画，按需拉起帧驱动
+    start_motion_loop();
+
+    // 3.2 低频监听系统主题与 Windows“减弱动态效果”变更（非冷启动基准模式下启用）
+    let _system_pref_timer = if !opts.benchmark_first_frame {
+        let timer = slint::Timer::default();
+        let session_pref = Arc::clone(&session);
+        let window_pref = window.as_weak();
+        let timer_motion = Rc::clone(&motion_timer);
+        timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
+            let prev_dark = session_pref.resolved_theme().is_dark();
+            let prev_reduced = session_pref.motion_profile().reduced_motion;
+            session_pref.refresh_system_preferences();
+            let now_dark = session_pref.resolved_theme().is_dark();
+            let now_reduced = session_pref.motion_profile().reduced_motion;
+            if (prev_dark != now_dark || prev_reduced != now_reduced)
+                && let Some(win) = window_pref.upgrade()
+            {
+                win.set_dark_mode(now_dark);
+                let snap = session_pref.motion_snapshot();
+                sync_motion_to_window(&win, snap);
+                if !snap.has_active_animations {
+                    timer_motion.stop();
+                }
+            }
+        });
+        Some(timer)
+    } else {
+        None
+    };
 
     // 窗口关闭即彻底退出进程（ADR-0002）
     let session_for_close = Arc::clone(&session);
@@ -137,6 +224,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     slint::run_event_loop()?;
     Ok(())
+}
+
+fn sync_motion_to_window(window: &MainWindow, snapshot: MotionSnapshot) {
+    window.set_welcome_progress(snapshot.welcome_entrance);
+    window.set_view_transition(snapshot.view_transition);
+    window.set_button_scale(snapshot.button_scale);
+    window.set_reduced_motion(snapshot.reduced_motion);
 }
 
 fn sync_session_to_window(window: &MainWindow, session: &AppSession, renderer_label: &str) {

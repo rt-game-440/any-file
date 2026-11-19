@@ -1,4 +1,4 @@
-// AnyFile 无边框自定义标题栏 + 欢迎/拖放窗口（工单 #2 / #3）
+// AnyFile 无边框自定义标题栏、欢迎/拖放窗口与物理弹簧动效绑定（工单 #2 / #3 / #4）
 
 export component MainWindow inherits Window {
     in property <bool> dark-mode: false;
@@ -8,8 +8,13 @@ export component MainWindow inherits Window {
     in property <bool> reduced-motion: false;
     in property <bool> is-maximized: false;
     in property <bool> max-button-hovered: false;
+    // 由 Rust 统一物理弹簧驱动实时写入的动效状态
+    in property <float> welcome-progress: 1.0;
+    in property <float> view-transition: 1.0;
+    in property <float> button-scale: 1.0;
 
     callback open-file-clicked();
+    callback open-button-state-changed(bool, bool);
     callback minimize-clicked();
     callback maximize-clicked();
     callback close-clicked();
@@ -186,12 +191,16 @@ export component MainWindow inherits Window {
             background: root.dark-mode ? #252932 : #DCE1EA;
         }
 
-        // 极简欢迎 / 拖放主区域
+        // 极简欢迎 / 拖放主区域（随物理弹簧平滑入场与视图过渡）
         VerticalLayout {
             vertical-stretch: 1;
-            padding: 32px;
+            padding-left: 32px;
+            padding-right: 32px;
+            padding-top: 32px + (1.0 - root.welcome-progress) * 14px;
+            padding-bottom: 32px;
             spacing: 20px;
             alignment: center;
+            opacity: clamp(root.welcome-progress * root.view-transition, 0.0, 1.0);
 
             // 拖放区卡片
             HorizontalLayout {
@@ -232,31 +241,44 @@ export component MainWindow inherits Window {
                             alignment: center;
                             padding-top: 8px;
 
-                            TouchArea {
-                                width: 156px;
-                                height: 40px;
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    root.open-file-clicked();
-                                }
+                            Rectangle {
+                                width: 164px;
+                                height: 44px;
 
-                                Rectangle {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    border-radius: 10px;
-                                    background: parent.pressed
-                                        ? (root.dark-mode ? #2A63C9 : #1D53B8)
-                                        : (parent.has-hover
-                                            ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
-                                            : (root.dark-mode ? #3370E3 : #2563EB));
+                                open-touch := TouchArea {
+                                    width: 156px * clamp(root.button-scale, 0.85, 1.15);
+                                    height: 40px * clamp(root.button-scale, 0.85, 1.15);
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.open-file-clicked();
+                                    }
+                                    changed has-hover => {
+                                        root.open-button-state-changed(self.has-hover, self.pressed);
+                                    }
+                                    changed pressed => {
+                                        root.open-button-state-changed(self.has-hover, self.pressed);
+                                    }
 
-                                    Text {
-                                        text: "打开文件";
-                                        font-size: 14px;
-                                        font-weight: 600;
-                                        color: #FFFFFF;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        border-radius: 10px;
+                                        background: open-touch.pressed
+                                            ? (root.dark-mode ? #2A63C9 : #1D53B8)
+                                            : (open-touch.has-hover
+                                                ? (root.dark-mode ? #3D7BF0 : #2B6CE6)
+                                                : (root.dark-mode ? #3370E3 : #2563EB));
+
+                                        Text {
+                                            text: "打开文件";
+                                            font-size: 14px;
+                                            font-weight: 600;
+                                            color: #FFFFFF;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                 }
                             }
